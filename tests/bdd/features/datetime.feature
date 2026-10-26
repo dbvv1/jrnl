@@ -175,16 +175,16 @@ Feature: Reading and writing to journal with custom date formats
 
     Scenario: Loading entry with ambiguous time stamp in timezone-aware journal (like Dayone)
         #https://github.com/jrnl-org/jrnl/issues/153
+        # The fixture stores 02:27 UTC, after Stockholm returned to UTC+1.
         Given we use the config "bug153.yaml"
         When we run "jrnl -1"
         Then we should get no error
         And the output should be
             """
-            2013-10-27 04:27 Some text.
+            2013-10-27 03:27 Some text.
             """
 
 
-    @skip #1422
     Scenario Outline: Using "tomorrow" near daylight savings works in Dayone journals
         Given we use the config "dayone.yaml"
         And now is "<date>"

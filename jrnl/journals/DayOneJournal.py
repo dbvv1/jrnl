@@ -61,10 +61,13 @@ class DayOne(Journal):
                         timezone_name = str(tzlocal.get_localzone())
                         timezone = zoneinfo.ZoneInfo(timezone_name)
                     date = dict_entry["Creation Date"]
-                    # convert the date to UTC rather than keep messing with
-                    # timezones
-                    if timezone.key != "UTC":
-                        date = date.replace(fold=1) + timezone.utcoffset(date)
+                    # plist dates are UTC; convert the instant before dropping
+                    # tzinfo for jrnl's local, naive entry dates.
+                    date = (
+                        date.replace(tzinfo=datetime.timezone.utc)
+                        .astimezone(timezone)
+                        .replace(tzinfo=None)
+                    )
 
                     entry = Entry(
                         self,
