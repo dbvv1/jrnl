@@ -3,6 +3,19 @@
 
 Feature: Upgrading Journals from 1.x.x to 2.x.x
 
+    Scenario: A modern JSON-style config does not trigger a 1.x upgrade
+        Given we use the config "modern_version_json_style.json"
+        When we run "jrnl -n 1"
+        Then we should get no error
+        And the output should contain "Life is good"
+        And the output should not contain "The following journals will be upgraded"
+
+    Scenario: A config with a pre-2.0 version is still upgraded
+        Given we use the config "old_version_json_style.json"
+        When we run "jrnl -9" and enter "Y"
+        Then we should get no error
+        And the output should contain "A life without chocolate is like a bad analogy."
+
     Scenario: Upgrade and parse journals with square brackets
         Given we use the config "upgrade_from_195.json"
         When we run "jrnl -9" and enter "Y"

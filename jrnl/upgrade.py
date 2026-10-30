@@ -3,6 +3,7 @@
 
 import logging
 import os
+import re
 
 from jrnl import __version__
 from jrnl.config import is_config_json
@@ -189,7 +190,46 @@ def upgrade_jrnl(config_path: str) -> None:
     print_msg(Message(MsgText.AllDoneUpgrade, MsgStyle.NORMAL))
 
 
+def _parse_config_version(version: object) -> tuple[int, ...] | None:
+    """Convert a config's ``version`` value to a comparable numeric tuple.
+
+    jrnl writes the package version (for example ``4.6``), but hand-written
+    configs may use a ``v`` prefix (for example ``v4.1``) and YAML may load the
+    value as a number rather than a string. Any non-numeric suffix (a
+    pre-release marker, for example) ends the comparison, since only the
+    numeric release matters for the 2.0 cutoff.
+
+    Returns None when the value cannot be interpreted as a version at all.
+    """
+    if isinstance(version, (int, float)):
+        version = str(version)
+    if not isinstance(version, str):
+        return None
+
+    parts = []
+    for part in re.split(r"[.+-]", version.strip().lstrip("vV")):
+        if not part.isdigit():
+            break
+        parts.append(int(part))
+    return tuple(parts) or None
+
+
 def is_old_version(config_path: str) -> bool:
+    """Check whether the config belongs to a pre-2.0 jrnl installation.
+
+    When the config carries a parseable ``version``, that field decides: any
+    version below 2.0 is old, and 2.0 or newer is not, no matter how the file
+    is formatted (a modern config can legitimately be written as JSON-compatible
+    YAML). Configs without a usable version keep the original heuristic, since
+    1.x was the last release to write its config as JSON.
+    """
+    config = load_config(config_path)
+    version = config.get("version") if isinstance(config, dict) else None
+    parsed_version = _parse_config_version(version)
+
+    if parsed_version is not None:
+        return parsed_version < (2,)
+
     return is_config_json(config_path)
 
 
