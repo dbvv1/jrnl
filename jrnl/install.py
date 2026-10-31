@@ -102,7 +102,7 @@ def load_or_install_jrnl(alt_config_path: str) -> dict:
                 )
             )
 
-        if is_old_version(config_path):
+        if is_old_version(config_path, config):
             from jrnl import upgrade
 
             upgrade.upgrade_jrnl(config_path)

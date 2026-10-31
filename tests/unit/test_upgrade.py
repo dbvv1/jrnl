@@ -125,10 +125,71 @@ def test_non_json_config_with_old_version_is_old(tmp_path):
     assert is_old_version(config_path) is True
 
 
-def test_unparseable_version_falls_back_to_json_check(tmp_path):
+def test_unparseable_version_does_not_fall_back_to_json_check(tmp_path):
+    """A present version field stays authoritative even when it cannot be
+    parsed. Source builds write ``version: source``; a JSON-style config with
+    that value must not be mistaken for a 1.x config."""
     config_path = _write_config(
         tmp_path,
         '{"version": "source", "journals": {"default": "journal.txt"}}',
     )
 
-    assert is_old_version(config_path) is True
+    assert is_old_version(config_path) is False
+
+
+@pytest.mark.parametrize("version_value", ['"source"', '""', "null", "'dev'"])
+def test_present_but_unparseable_version_is_not_old(tmp_path, version_value):
+    config_path = _write_config(
+        tmp_path,
+        f'{{"version": {version_value}, "journals": {{"default": "j.txt"}}}}',
+    )
+
+    assert is_old_version(config_path) is False
+
+
+def test_unparseable_version_in_yaml_style_config_is_not_old(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        "version: source\njournals:\n  default: journal.txt\n",
+    )
+
+    assert is_old_version(config_path) is False
+
+
+def test_is_old_version_reuses_already_loaded_config(tmp_path, monkeypatch):
+    """The caller can pass the config it already loaded, so a duplicate-key
+    config does not print its warning twice."""
+    config_path = _write_config(
+        tmp_path,
+        '{"version": "4.6", "journals": {"default": "journal.txt"}}',
+    )
+    config = {"version": "4.6", "journals": {"default": "journal.txt"}}
+
+    def fail_load_config(_path):
+        message = "is_old_version unexpectedly reloaded the config"
+        raise AssertionError(message)
+
+    monkeypatch.setattr("jrnl.upgrade.load_config", fail_load_config)
+
+    assert is_old_version(config_path, config) is False
+
+
+def test_load_or_install_passes_loaded_config_to_version_check(tmp_path, monkeypatch):
+    """load_or_install_jrnl already loaded the config; is_old_version must not
+    load it a second time (which would duplicate duplicate-key warnings)."""
+    from jrnl import install
+
+    config_path = _write_config(
+        tmp_path,
+        '{"version": "4.6", "journals": {"default": "journal.txt"}}',
+    )
+
+    def fail_load_config(_path):
+        message = "config was loaded again inside is_old_version"
+        raise AssertionError(message)
+
+    monkeypatch.setattr("jrnl.upgrade.load_config", fail_load_config)
+
+    config = install.load_or_install_jrnl(config_path)
+
+    assert config["version"] is not None

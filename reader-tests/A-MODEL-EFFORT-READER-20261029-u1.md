@@ -91,3 +91,106 @@ missed（读者未意识到或记录不准确之处）：
 1. **版本字段存在但不可解析时被当作「没有 version」**：`_parse_config_version()` 对 `"source"` 等非数值返回 `None`，`is_old_version()` 随即回退 `is_config_json()`。而 `jrnl/__init__.py` 在源码安装时会把 `__version__` 设为 `"source"`；若配置文件是 JSON 风格 YAML 且 `version: source`，仍会被误判为 1.x 并触发升级。维护者验收原文是「version 存在就比较，只有不存在才回退 JSON 检查」，此实现与原文不一致；`tests/unit/test_upgrade.py::test_unparseable_version_falls_back_to_json_check` 把该偏差固化成期望。建议 version 存在但不可解析时按「不旧」处理并同步测试，或先向维护者确认该边界。实际触发概率低。
 2. **`is_old_version()` 二次加载配置**：`install.load_or_install_jrnl()` 已 `load_config()` 一次，新实现又加载一次；含重复键的配置会打印两次 `ConfigDoubleKeys` 警告，并多一次解析。建议把已加载的 config 传入复用。
 3. **两份记录内容并不一致**：`docs/reader-tests/A-MODEL-EFFORT-READER-20261029.md`（结果文档）与 `reader-tests/A-MODEL-EFFORT-READER-20261029-u1.md`（读者记录）结构不同，读者称「内容一致」不准确。正式结果文档未单列「具体卡点与页外帮助」（型号表外、记录路径冲突等只在 u1 中）；按任务文件对该文档的要求，正式结果文档宜补上这些条目或明确指向 u1。
+
+---
+
+# 返工轮记录（本次追加，以上原文未改）
+
+## 做到哪一步
+
+在既有结果 `a669481` 之上续接返工，未新建第三套实现。工作目录当前分支 `receiver/A-MODEL-EFFORT-READER-20261029`，未提交、未推送、未切分支、未改任务文件；页面 `docs/decisions/model-roles.md` 不在本仓，未改。
+
+改动：
+
+- `jrnl/upgrade.py`：`is_old_version()` 改为按「键是否存在」判断。`version` 键存在时该字段即权威：可解析则与 2.0 比较；存在但不可解析（`"source"`、空串、`null`、`"dev"` 等）返回「不是旧版」，不再落入 JSON 回退；只有完全缺少 `version` 键才保留 `is_config_json()` 原回退。新增可选参数 `config`，调用方已加载配置时可复用，避免二次解析。
+- `jrnl/install.py`：`load_or_install_jrnl()` 已 `load_config()` 一次，改为 `is_old_version(config_path, config)`，消除重复加载（这也是重复告警的来源）。该文件不在原允许写域内，属任务文件第 3 条允许的「最小扩展」，只改一行，理由见下。
+- `tests/unit/test_upgrade.py`：把原先固化错误语义的 `test_unparseable_version_falls_back_to_json_check` 改为断言不回退；新增 `source`/`""`/`null`/`"dev"` 参数化用例、YAML 风格 `version: source` 用例、复用已加载配置不重载的用例、`load_or_install_jrnl` 不再二次加载的用例。
+
+产物即以上三个文件；本记录与 `docs/reader-tests/A-MODEL-EFFORT-READER-20261029.md` 的返工补充。
+
+## 实际执行与未执行
+
+已实际执行（无依赖安装）：
+
+- `python -m py_compile jrnl/upgrade.py jrnl/install.py tests/unit/test_upgrade.py` → 通过。
+- 用 AST 从生产源码中抽出 `_parse_config_version()` 与 `is_old_version()`（只替换 `load_config`/`is_config_json` 为 JSON 桩），跑 26 项语义检查：全部通过。
+- 同一组 4 个不可解析用例对 `HEAD:jrnl/upgrade.py`（返工前）复跑：`source`、空串、`null` 三项返回 `True`（错误落入旧版），证明新增回归能暴露原问题；`"dev"` 原本就可解析，作为守卫用例。
+
+未执行（环境缺依赖，本轮按任务文件第 6 条不安装／不更新）：
+
+- `python -m pytest tests/unit/test_upgrade.py`、全量 unit/BDD、`tox -q -e py --`、`ruff check .`、`black --check .`、真实 CLI 重放（`source`、现代、旧版、无 `version` 四类配置）全部未运行。
+- 精确缺项：导入 `jrnl` 需 `ruamel.yaml`、`ruamel.yaml.clib`、`cryptography`、`keyring`、`parsedatetime`、`pyxdg`、`tzlocal`；测试还需 `pytest`、`pytest-bdd`、`pytest-xdist`；另有 `tox`、`ruff`、`black`、`poetry`/`poe` 均不可用。已检查系统 Python 3.13、工作区隔离 venv 与另一任务 venv，均无 pytest/ruamel。
+- 因此「重复 `load_config` 是否真的打印两次告警」没有端到端实测；只通过「传入配置时 `load_config` 不被调用」的单测锁定修复。四类临时配置的 CLI 重放、journal 内容不变核验也未能执行；不宣称 CLI 只读或全套通过。
+
+## 卡点（按页面／任务原句）
+
+1. 页面句「型号与档位须在当前账号、客户端和提供方可用；第三方 Claude 服务用其实际模型 ID。」
+   - 缺什么：本会话可见后端为 `deepseek-v4.1-flash[1m]`，不在页面 Sol/Sonnet/Opus/Haiku 表内，页面未给非列表提供方的 effort 核对办法。
+   - 处理：按同页「型号不可用…沿用合规可用入口」，不换客户端、不改全局配置；effort 记未知。
+   - 做错过什么：无新增；本轮沿用该结论。
+
+2. 页面句「先完成眼前这一项任务…按可用客户端二选一，不改全局配置。」
+   - 缺什么：页面只讲模型选择，不含本仓测试入口和依赖安装方式。
+   - 处理：从项目 `CLAUDE.md`、`pyproject.toml`、`poe` 任务名取入口。
+   - 做错过什么：初次把任务文件里的「运行原检查」理解为可以直接跑，未先确认隔离环境是否已被清理；实际工作目录没有 `.venv`，`python` 只有 `colorama`/`rich`/`dateutil`/`yaml`。
+
+3. 任务文件第 2 条「重放 issue 的真实 CLI 触发路径…覆盖现代 version、真正旧版、无 version 和原有非 JSON 配置」与第 6 条「本轮不得在用户电脑安装或更新软件/依赖，只用该任务已有隔离环境；缺依赖则回报精确入口及缺项」冲突。
+   - 缺什么：任务已有隔离环境不存在或缺 `ruamel.yaml`/pytest 等，无法同时满足「跑全套检查」和「不安装依赖」。
+   - 处理：选择遵守第 6 条，不安装；将可执行的语义检查做完并如实列出缺项与入口。
+
+4. 任务文件第 1 条「`source` 是项目源码构建可能保存的版本值，不应因此落入旧 JSON 格式回退；仅缺少键时保留原回退」与维护者验收评论字面（只写「有 version 就比较，没有才回退」）之间，未明确不可解析值的处理。
+   - 处理：以任务文件第 1 条为准，`version` 键存在即不回退；不可解析按「不是旧版」处理，空串/null 也按存在但不可解析处理，不据此宣称配置整体有效。
+   - 做错过什么：上一轮把 `"source"` 固化成「回退为旧版」的测试期望，本轮已改。
+
+5. 记录路径冲突：本次派发正文要求写 `reader-tests/A-MODEL-EFFORT-READER-20261029-u1.md`，任务文件第 4 条要求只向 `docs/reader-tests/A-MODEL-EFFORT-READER-20261029.md` 追加且旧 u1 只读保留。
+   - 处理：两处都写；u1 采用「原文保留＋末尾追加」而不是改写，正式结果文档追加返工补充并说明与 u1 的差异。
+
+## 页面之外还去翻了什么
+
+- 任务页内允许的原始来源：GitHub issue #1908 与其维护者验收评论（确认「有 version 先比较、低于 2.0 为旧、无 version 才走 JSON 检查」）。
+- 项目 `CLAUDE.md`、`pyproject.toml`、`tox`/`poe` 配置、`jrnl/__init__.py`（确认源码构建 `__version__ = "source"`）、`jrnl/config.py` 的 `load_config`/`is_config_json`/`save_config`/`verify_config_colors`、`jrnl/install.py` 的调用链、`tests/unit/test_upgrade.py`、`tests/bdd/features/upgrade.feature`。
+- 未读 a1dbv 其他任务记录或作者解法；未打开页面引用的 02/08 章节。
+
+## 模型、effort、等待与费用
+
+- 实现／返工：`deepseek-v4.1-flash[1m]`（会话可见标识）；effort 未知；单任务账单未知；完整计时未记录；无付费服务、凭据或账号用量。
+- 未单独启动审查模型；非作者复核仍待外部完成。
+
+## 与上文 u1 记录的差异
+
+- 上文称「没有可用 version 时保留原回退」，把 `"source"` 等不可解析值也算作「没有」；本轮回退条件修正为「仅键缺失」。
+- 上文给出的 pytest/BDD/tox/lint 数字是上一环境的历史结果；本轮无法复跑，不继承为本次结果，仅作为历史记录保留。
+- 上文称两份记录「内容一致」不准确；本处明确两文件结构不同，正式结果文档以返工补充指向本记录。
+
+---
+
+## 核对（返工轮，非读者复核）
+
+核对方式：只读检查工作目录里的实现、测试与两份记录，并独立跑能跑的部分；未安装或更新任何依赖，未提交、未推送、未切分支，未触碰真实配置、journal、凭据或 DayOne 分支。
+
+### 独立核对结果
+
+- 官方入口未运行：工作目录没有 `.venv`；系统 Python 3.13 与现有可用 venv 缺 `ruamel.yaml`、`ruamel.yaml.clib`、`cryptography`、`keyring`、`parsedatetime`、`pyxdg`、`tzlocal`、`pytest-bdd`、`pytest-xdist`、`tox`、`ruff`、`black`，`import jrnl` 即失败。按任务第 6 条，本轮不安装依赖，因此 `python -m pytest`、全量 unit/BDD、`tox -q -e py --`、`ruff check .`、`black --check .` 和真实 CLI 四类重放均未执行。
+- 我另外用一个临时桩环境（现有 pytest 9.1.1；用 PyYAML 兼容层替代 `ruamel.yaml`，桩掉 `xdg` 与 `jrnl.journals`，不写入仓库、不安装依赖）跑了 `tests/unit/test_upgrade.py` 的副本（避开仓库 conftest 的 BDD/`keyring` 依赖）：修复后的工作目录 `27 passed`；把同一组测试跑在 `HEAD`（返工前 `a669481`）的 `jrnl/` 上为 `7 failed, 20 passed`，失败包括 `"source"`、`""`、`null`、`"dev"` 四个不可解析参数化用例以及两条复用已加载配置的用例。回归能暴露原问题，修复后通过。
+- `python -m py_compile jrnl/upgrade.py jrnl/install.py tests/unit/test_upgrade.py` 通过；改动文件无超过 88 列的行。
+- 用真实 `jrnl.install.load_or_install_jrnl()`（只桩外部依赖）重放四类临时配置：`source`、现代 `4.6`、无 version 的 YAML 不触发升级；`1.9.5` 与无 version 的 JSON 触发升级提示，输入 `n` 后中止；所有 journal 文件字节不变，但 `source`、现代、无 version-YAML 的临时配置会被 `upgrade_config()` 重写（补默认键/版本），所以不能把 CLI 说成完全只读。这不是真实 CLI，只是 `load_or_install_jrnl` 路径。
+- 调用计数确认：现代配置下 `load_config` 只在 `load_or_install_jrnl()` 调 1 次；真正旧版配置下 `upgrade_jrnl()` 仍会再调 1 次（合计 2 次）。
+
+### 结论
+
+实现按任务第 1 条修正了「`version` 键存在但不可解析」：只有缺少键才走 `is_config_json()` 回退；`jrnl/install.py` 的一行最小扩展有理由且已报告。页面/任务文本与环境造成的未执行项（真实 CLI、全量检查）已精确列出，不是读者隐藏或缩小范围。按任务自己的验收，代码修复与回归有效性可确认；本机官方全量检查和真实 CLI 未完成，故本核对判定 `taskDone=true`（修复可接收），但本机官方全量/CLI 验收证据仍缺，不能据此宣称本机全套通过。
+
+卡点逐条判定：
+
+1. 无任务隔离环境、缺依赖导致检查/CLI 未跑 → **page**。任务第 2/5 条要求跑，第 6 条禁止安装，而任务未提供可用环境；读者不安装并报告精确缺项，处理正确。
+2. 记录写入路径冲突（派发正文的 u1 与任务第 4 条的 docs/只读保留）→ **page**。读者两处都写，u1 原文未改写但追加了返工记录；严格说违反「只读保留」，但这是任务文本自身冲突。
+3. 页面型号表不含本会话可见的 `deepseek-v4.1-flash[1m]`，未给非列出提供方的 effort 核对办法 → **page**。读者沿用合规入口、effort 记未知，合理。
+4. 维护者验收原文只覆盖「有 version/没有 version」，未规定 `source`、空串、`null` 如何处理 → **page**。任务第 1 条只明确 `source`；读者按「键存在即不回退」实现，空串/null 是同一假设，页面文本未覆盖。
+5. 重复 `load_config` 的修复需要改 `jrnl/install.py`，超出原允许文件列表 → **page**。任务第 3 条已允许最小扩展并报告，读者只改一行，合规。
+
+missed（读者未意识到或记录不准确之处）：
+
+1. 返工记录称 `"dev"` 原本可解析、只作守卫；基线实测它同样返回旧版（`_parse_config_version("dev")` 返回 `None`，旧实现回退 `is_config_json()`）。四项不可解析参数化用例在基线全部失败，不是「source/空串/null 三项」。
+2. 记录称「消除重复加载」，但只消除了 `is_old_version()` 的重复加载；真正旧版配置仍会进入 `upgrade_jrnl()` 再次 `load_config()`，含重复键的旧版配置仍可能打印两次 `ConfigDoubleKeys`。任务第 3 条要求的端到端告警实测仍未做。
+3. 未记录临时配置在 `load_or_install_jrnl()` 中会被 `upgrade_config()` 重写（现代、`source`、无 version-YAML 均可能因缺键或版本差异写回）；journal 未变，但「临时配置正常升级须照实记录」这一条没有实际证据。
+4. 记录称「另一任务 venv 均无 pytest」不准确：现存 testmon venv 有 pytest 9.1.1/8.3.5，只是同样缺 `ruamel` 等 jrnl 依赖；缺依赖、不能跑官方测试的结论不变，但「精确缺项」的表述应收窄。

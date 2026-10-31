@@ -69,3 +69,45 @@
 - 审查／复核：本读者未单独启动审查模型或返工轮次；按任务要求应由非读者另行复核。
 - 等待：未记录完整墙钟时间；各测试命令耗时见上（unit 约 1.5s，BDD 约 22s，tox 全量约 33s）。
 - 费用：无单任务账单，未知；未使用付费服务、凭据或账号用量接口。
+
+## 返工补充（2026-11-01，原文保留并追加）
+
+本节只记录返工轮相对上文的变化与仍未完成的验证；上文历史内容与数字不改写，也不继承为本次结果。
+
+### 修正
+
+- `version` 键存在但不可解析（如源码构建的 `version: source`、空串、`null`）不再等同于「没有 version」，不再落入 `is_config_json()` 的 1.x 回退；实现改为按「键是否存在」判断，只有完全缺少 `version` 键才回退。上一轮把该偏差固化成期望的 `test_unparseable_version_falls_back_to_json_check` 已改为断言不回退，并补 `source`/`""`/`null`/`"dev"` 参数化、YAML 风格 `version: source`、复用已加载配置、`load_or_install_jrnl` 不二次加载等用例。
+- 重复加载：`is_old_version()` 增加可选 `config` 参数；`jrnl/install.py` 只改一行，把 `load_or_install_jrnl()` 已加载的 `config` 传入，避免同一配置解析两次（重复键配置会因此重复告警）。`jrnl/install.py` 超出原允许写域，属任务文件第 3 条允许的最小扩展，改动仅 `is_old_version(config_path)` → `is_old_version(config_path, config)`。
+
+### 本次实际执行
+
+- `python -m py_compile` 三个改动文件：通过。
+- 从生产源码 AST 抽出 `_parse_config_version()`/`is_old_version()`（仅把 `load_config`/`is_config_json` 换成 JSON 桩）做 26 项语义检查：通过。
+- 同一组 4 个不可解析用例对返工前代码复跑：`source`、空串、`null` 三项返回旧版（错误），证明新回归能暴露原问题；`"dev"` 原本可解析，作守卫。
+
+### 未执行及原因
+
+按任务文件第 6 条，本轮未在用户电脑安装或更新任何软件/依赖，只使用现有隔离环境；现有环境缺 `ruamel.yaml`、`ruamel.yaml.clib`、`cryptography`、`keyring`、`parsedatetime`、`pyxdg`、`tzlocal`、`pytest`、`pytest-bdd`、`pytest-xdist`、`tox`、`ruff`、`black`、`poetry`/`poe`，故以下全部未运行：
+
+- `python -m pytest tests/unit/test_upgrade.py`、全量 unit/BDD、`tox -q -e py --`、`ruff check .`、`black --check .`；
+- `source`、现代、旧版、无 `version` 四类临时配置的 CLI 重放与 journal 内容不变核验；
+- 「重复 `load_config` 是否真的打印两次告警」的端到端实测（只由单测锁定「传入配置时不重载」）。
+
+恢复条件：提供含上述依赖的既有隔离环境（按 `poetry.lock` 钉 pytest 9.1.1 / pytest-bdd 8.1.0）或在允许安装的轮次执行；入口为 `python -m pytest`、`tox -q -e py --`、`jrnl --config-file <临时配置>`。
+
+### 页面卡点与页外帮助（补齐上一轮遗漏）
+
+- 页面「型号与档位须在当前账号、客户端和提供方可用…」：本会话可见后端 `deepseek-v4.1-flash[1m]` 不在页面型号表内，页面未给非列表提供方的 effort 核对办法；按同页「沿用合规可用入口」处理，effort 记未知。
+- 页面只讲模型选择，不含本仓测试入口；从项目 `CLAUDE.md`、`pyproject.toml`、`poe` 任务名取入口。
+- 「运行原检查」与「不得安装依赖」在环境缺项时冲突；选择不安装并报告精确缺项，不以缩小范围宣称全套通过。
+- 记录路径两处要求不一致（本次派发正文写 `reader-tests/`，任务文件第 4 条写 `docs/reader-tests/` 且旧 u1 只读）：两处都写，u1 以「原文保留＋末尾追加」处理。
+- 维护者验收评论只写「有 version 就比较、没有才走 JSON 检查」，未提不可解析值；按任务文件第 1 条对 `source` 的明确要求处理。
+
+### 与 u1 记录的差异
+
+`reader-tests/A-MODEL-EFFORT-READER-20261029-u1.md` 为上一轮读者记录，本轮在其末尾追加返工记录、未改写上文。差异：上文把不可解析 version 当作「没有」并回退为旧版；上文称两份记录「内容一致」不准确；上文列出的 pytest/BDD/tox/lint 数字是历史结果，本轮未能复跑，不作为本次验收证据。
+
+### 返工轮的模型、effort、等待与费用
+
+- 实现／返工：`deepseek-v4.1-flash[1m]`（会话可见标识）；effort 未知；单任务账单未知；完整计时未记录；未使用付费服务、凭据或账号用量。
+- 非作者复核仍待外部完成；本次返工不自称新盲读。

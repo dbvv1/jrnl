@@ -214,20 +214,27 @@ def _parse_config_version(version: object) -> tuple[int, ...] | None:
     return tuple(parts) or None
 
 
-def is_old_version(config_path: str) -> bool:
+def is_old_version(config_path: str, config: dict | None = None) -> bool:
     """Check whether the config belongs to a pre-2.0 jrnl installation.
 
-    When the config carries a parseable ``version``, that field decides: any
-    version below 2.0 is old, and 2.0 or newer is not, no matter how the file
-    is formatted (a modern config can legitimately be written as JSON-compatible
-    YAML). Configs without a usable version keep the original heuristic, since
-    1.x was the last release to write its config as JSON.
-    """
-    config = load_config(config_path)
-    version = config.get("version") if isinstance(config, dict) else None
-    parsed_version = _parse_config_version(version)
+    When the config has a ``version`` key, that field is authoritative: any
+    version below 2.0 is old and 2.0 or newer is not, no matter how the file is
+    formatted (a modern config can legitimately be written as JSON-compatible
+    YAML). A present but unparseable value -- for example ``"source"``, which
+    source builds write, or an empty/null value -- is still a version field, so
+    it must not fall back to the legacy JSON heuristic; such a config is not
+    treated as pre-2.0. Only a missing ``version`` key keeps the original
+    heuristic, since 1.x was the last release to write its config as JSON.
 
-    if parsed_version is not None:
+    Pass ``config`` when it is already loaded to avoid parsing the file twice.
+    """
+    if config is None:
+        config = load_config(config_path)
+
+    if isinstance(config, dict) and "version" in config:
+        parsed_version = _parse_config_version(config["version"])
+        if parsed_version is None:
+            return False
         return parsed_version < (2,)
 
     return is_config_json(config_path)
