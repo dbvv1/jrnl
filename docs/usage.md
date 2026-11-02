@@ -72,6 +72,28 @@ desired tag with the symbol:
 jrnl Had a wonderful day at the @beach with @Tom and @Anna.
 ```
 
+!!! note
+    In PowerShell, an unquoted argument that starts with `@` is a splatting
+    expression, so `jrnl @beach` can drop the tag before `jrnl` sees it and
+    open the editor or create a new entry instead of filtering. Escape the
+    tag with PowerShell's backtick, or quote it; `\@beach` does not work
+    because PowerShell passes the backslash through to `jrnl`. The same
+    quoting protects other reserved characters such as `#` and `&`.
+
+For example, these pass `@beach` to `jrnl` in PowerShell:
+
+```powershell
+jrnl `@beach
+jrnl '@beach'
+jrnl "@beach"
+```
+
+Quote the whole entry when it contains several tags:
+
+```powershell
+jrnl "Had a wonderful day at the @beach with @Tom and @Anna."
+```
+
 Although you can use capitals while tagging an entry, searches by tag are
 case-insensitive.
 

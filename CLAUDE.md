@@ -44,6 +44,15 @@ poetry run poe docs-run
 
 Tests run in parallel by default (`-n=auto` via pytest-xdist). To disable for debugging: `poetry run pytest -n0 -x`.
 
+## Editing Documentation
+
+User guide pages live in `docs/*.md`; the site is built with MkDocs from
+`mkdocs.yml`, and the contributor workflow is in `docs/contributing.md`.
+Preview edits with `poetry run poe docs-run`. CI also runs
+`poetry run poe docs-check`, an accessibility check that needs `npm install`
+and a docs server already running; if either is unavailable, report the
+check as unverified instead of claiming it passed.
+
 ## Architecture
 
 ### Control Flow
