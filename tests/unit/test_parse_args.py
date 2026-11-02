@@ -151,10 +151,19 @@ def test_import_alone():
 @pytest.mark.parametrize(
     "cli",
     [
+        "--import --format jrnl",
         "--import --format whatformats",
         "--import --format json",
         "--import --format=json",
         "--format json --import",
+        # argparse accepts any unambiguous prefix of a long option.
+        "--imp --format json",
+        "--impo --format json",
+        "--impor --format json",
+        "--import --form json",
+        # --export is the hidden alias for --format.
+        "--import --export json",
+        "--import --exp json",
     ],
 )
 def test_import_with_format_is_rejected(cli, capsys):
@@ -170,6 +179,53 @@ def test_import_with_format_is_rejected(cli, capsys):
 
     assert wrapped_e.value.code == 2
     assert "not allowed with argument --import" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "cli",
+    [
+        "--version --import --format json",
+        "--import --format json --version",
+    ],
+)
+def test_version_takes_precedence_over_import_format(cli):
+    """--version ran before --import in the original CLI, so it must still win."""
+    from jrnl.commands import postconfig_import
+    from jrnl.commands import preconfig_version
+
+    assert cli_as_dict(cli) == expected_args(
+        preconfig_cmd=preconfig_version,
+        postconfig_cmd=postconfig_import,
+        export="json",
+    )
+
+
+@pytest.mark.parametrize(
+    "cli",
+    [
+        "--help --import --format json",
+        "--import --format json --help",
+    ],
+)
+def test_help_takes_precedence_over_import_format(cli, capsys):
+    with pytest.raises(SystemExit) as wrapped_e:
+        cli_as_dict(cli)
+
+    assert wrapped_e.value.code == 0
+    assert "usage:" in capsys.readouterr().out
+
+
+def test_import_format_after_double_dash_is_entry_text():
+    """Everything after a bare -- is text, even if it spells an option."""
+    assert cli_as_dict("-- --import --format json") == expected_args(
+        text=["--import", "--format", "json"]
+    )
+
+
+def test_double_dash_after_format_keeps_search_text():
+    assert cli_as_dict("--format json -- --import") == expected_args(
+        export="json", text=["--import"]
+    )
 
 
 def test_format_without_import_is_unaffected():

@@ -38,6 +38,27 @@ class IgnoreNoneAppendAction(argparse._AppendAction):
             super().__call__(parser, namespace, values, option_string)
 
 
+def resolve_option_string(
+    arg: str, long_options: set[str], option_strings: set[str]
+) -> str | None:
+    """Resolve an argument token to its option string the way argparse does.
+
+    argparse accepts any unambiguous prefix of a long option (``--imp`` for
+    ``--import``, ``--form`` for ``--format``), so a plain string equality
+    check misses valid spellings. Values after ``--`` are handled by the caller.
+    """
+
+    if arg in option_strings:
+        return arg
+
+    if not arg.startswith("--"):
+        return None
+
+    name = arg.split("=", 1)[0]
+    matches = {option for option in long_options if option.startswith(name)}
+    return matches.pop() if len(matches) == 1 else None
+
+
 def parse_import_and_format(args: list[str], parser: argparse.ArgumentParser) -> None:
     """
     --format selects an export format, so it cannot be combined with --import.
@@ -48,13 +69,43 @@ def parse_import_and_format(args: list[str], parser: argparse.ArgumentParser) ->
     combination the --import help text itself describes -- is rejected as an
     invalid choice, and the user is handed a list of export formats to pick
     from instead of being told the two options do not go together.
+
+    Everything after a bare ``--`` is entry text or a search term, not an
+    option, so it must not trigger this check. ``--help``, ``--version`` and
+    other pre-config commands are resolved before --import, so they keep their
+    original precedence when they appear in the option part of the command.
     """
 
-    if "--import" not in args:
+    if "--" in args:
+        args = args[: args.index("--")]
+
+    option_strings = {
+        option for action in parser._actions for option in action.option_strings
+    }
+    long_options = {option for option in option_strings if option.startswith("--")}
+    parsed_options = {
+        option
+        for arg in args
+        if (option := resolve_option_string(arg, long_options, option_strings))
+    }
+
+    # These commands run before --import in the controller; do not turn their
+    # successful exit into an argument error.
+    preconfig_options = {
+        option
+        for action in parser._actions
+        if action.dest == "preconfig_cmd" or isinstance(action, argparse._HelpAction)
+        for option in action.option_strings
+    }
+    if preconfig_options & parsed_options:
         return
 
-    if any(arg == "--format" or arg.startswith("--format=") for arg in args):
-        parser.error("argument --format: not allowed with argument --import")
+    if "--import" not in parsed_options:
+        return
+
+    for option in parsed_options:
+        if option in ("--format", "--export"):
+            parser.error(f"argument {option}: not allowed with argument --import")
 
 
 def parse_not_arg(

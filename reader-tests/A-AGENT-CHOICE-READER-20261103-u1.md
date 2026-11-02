@@ -127,3 +127,125 @@
 
 ### 页面能否指导选路
 页面“已有入口能完成就保留”“先读项目规则、核工作树差量”“自己核 diff、重放原触发路径”足以指导本次选路与验证；本次选“保留当前会话”符合页面结论。缺口集中在“已有未提交候选/写者不明”的处置规则，以及缺依赖时如何找已有隔离环境，建议各补一句；上游实时状态与别名／缩写边界不影响本次选路结论。
+
+## 修订（第二轮，2026-11-03）
+
+> 本轮是原 result_branch 上从 `655d8a9` 的定点返工，不是新读者实测。首轮记录、原提交与失败原样保留，仅在文末追加。
+
+### 1. 做到哪一步、产物在哪
+
+继续按页面《30 秒结论》和《第一步》选择**保留当前会话**，没有另起 Codex/Cursor/云端入口。页面要求的“先读项目规则、确认工作树差量与写者”照做：本轮起手工作树干净，HEAD 就是 `655d8a9`，只有单一写者。
+
+返工内容（`jrnl/args.py`）：
+
+- 先把参数在裸 `--` 处截断，`--` 之后的正文／检索词不再当选项；因此 `-- --import --format json` 与 `--format json -- --import` 恢复为合法输入。
+- 按 argparse 的实际语义解析长选项，而不是字符串等值比较；覆盖 `--imp`／`--impo`／`--impor`（`--import` 的唯一前缀）、`--form`（`--format` 的唯一前缀）、隐藏别名 `--export`，以及 `--i`／`--exp` 等其它唯一前缀。
+- 检测到 `--help`／`-h`／`--version`／`-v`／`--diagnostic` 等 preconfig 命令时跳过本互斥检查，交给原有 parser/controller 顺序处理，保留它们的原有优先级。
+- 报错文案按识别到的选项名生成：`argument --format: not allowed with argument --import`；使用别名时是 `argument --export: not allowed with argument --import`。
+- 未改 `jrnl/messages/MsgText.py`（本轮不需要）、依赖、扫描器、白名单、全局配置或权限。
+
+回归（`tests/unit/test_parse_args.py`）：
+
+- 错误组合扩到 11 个：原 5 个（含 `--import --format jrnl`）＋ `--imp`／`--impo`／`--impor`、`--import --form`、`--import --export`、`--import --exp`。
+- 新增 version 优先级 2 例、help 优先级 2 例、`--` 边界 2 例；保留 `--format json` 单独导出用例。
+
+产物（仓库相对路径）：
+
+- `jrnl/args.py`
+- `tests/unit/test_parse_args.py`
+- 本记录 `reader-tests/A-AGENT-CHOICE-READER-20261103-u1.md`
+
+未提交、未推送、未切换分支、未改任务文件、未改 a1dbv 页面或其他卡。
+
+### 2. 实际验证（修前失败、修后通过）
+
+把 `jrnl/args.py` 换回 `655d8a9`（即本轮修改前）并清掉 `__pycache__`，跑同一套 `tests/unit/test_parse_args.py`：
+
+- 修前：12 failed / 56 passed（12 个新用例全部失败；原有用例仍通过）。
+- 修后：68 passed。
+
+CLI 实测（临时 config／journal，`<deps-python>` 直调 `jrnl.main.run`）：
+
+| 命令 | 退出码 | 关键结果 |
+|---|---|---|
+| `--import --format jrnl` | 2 | `argument --format: not allowed with argument --import` |
+| `--import --format json` | 2 | 同上 |
+| `--import --format whatformats`（未知格式） | 2 | 同上 |
+| `--import --format=json` | 2 | 同上 |
+| `--format json --import` | 2 | 同上 |
+| `--imp --format json` | 2 | 同上 |
+| `--impo --format json` | 2 | 同上 |
+| `--impor --format json` | 2 | 同上 |
+| `--import --form json` | 2 | 同上 |
+| `--import --export json` | 2 | `argument --export: not allowed with argument --import` |
+| `--import --exp json` | 2 | 同上 |
+| `--import --file <tmp-input>` | 0 | 正常导入 |
+| 从 stdin 执行 `--import` | 0 | `1 imported to default journal` |
+| `--format json` | 0 | 合法 JSON |
+| `--format text` | 0 | 正常输出正文 |
+| `--help` | 0 | 帮助 |
+| `--version --import --format json` | 0 | 打印版本（优先级保留） |
+| `--import --format json --version` | 0 | 打印版本（优先级保留） |
+| `--help --import --format json` | 0 | 打印帮助（优先级保留） |
+| `--diagnostic --import --format json` | 0 | 打印诊断（优先级保留） |
+| `-- --import --format json` | 0 | 作为正文追加，journal 中出现 `--import --format json` 条目 |
+| `--format json -- --import` | 0 | 作为检索词 `--import`，正常完成导出 |
+
+原套件结果：
+
+- `pytest tests/unit -q -n0`：212 passed, 27 skipped（首轮 199/27；净增 13 个用例）。
+- `pytest tests/bdd/test_features.py -q -n0`：497 passed, 17 skipped；定向 `-k "import or format"`：31 passed, 1 skipped。
+- `ruff check .`：All checks passed。
+- `black --check .`：76 files would be left unchanged。
+- 未运行：`poe lint` 的 `poetry check` 步骤与 tox 路径，本机无 `poetry`／`tox`，且按约束未安装。未跑项未被隐藏。
+
+### 3. 卡点（页面哪一句、缺什么、做错过什么）
+
+1. **页面“先读项目规则，确认工作树差量与写者”**：页面仍只要求“确认”，没有给“已有未提交候选且写者不明时继续改还是只验证”的处置规则。首轮遇到该情况；本轮起手工作树干净，不触发，但缺口仍在。
+2. **页面“已经处于能读仓库、改文件和运行检查的会话，就直接继续”**：页面默认检查能跑，未写“缺依赖且禁止安装时如何找到已有的隔离环境”。本轮复用上一轮遗留的 `<deps-python>` 只作解释器，未安装、未读其中旧读者文件或结论。
+3. **页面未覆盖“选项值本身长得像选项”**：`--config-override` 一次吃两个值，argparse 会把 `--import --config-override editor --format` 里的 `--format` 当作值。基线 exit 0，本轮预扫描会误报 exit 2。该边界不在返工清单内，记为未修残余；现有清单内的缩写、别名、help/version 与 `--` 边界均已处理。
+4. **环境卡点（不是页面方法问题）**：本机 Windows 控制台默认 GBK，第一次跑 `--format text`／`--version` 因输出含非 GBK 字符得到 `UnicodeEncodeError`、exit 1。这是环境编码，不是代码行为；设 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8` 后复跑 exit 0，与基线一致。做错的一步是把首次 exit 1 当成了 CLI 行为，复跑后修正。
+5. **原 page 解析提交／全文指纹**：本轮输入里只有 `job.md` 附入的页面全文，没有当时保留的解析回执或指纹。按任务要求“原件没有就明确无法恢复”，不拿当前页面回填，也不重跑 fresh reader。页面文本、输入回执、实际采用三者分开：页面=job.md 附文；输入回执=缺失；实际采用=本轮返工与验证。
+6. **#2120 状态**：沿用负责人 2026-11-02 22:17 UTC 的公开观察（仍 open／未合，head `f4c6e2db`、base `90de4948`），本轮未联网复核，也不以 PR 状态代替本地 CLI 验收。
+
+### 4. 页面之外还翻过什么
+
+- 任务文件 `job.md`（页面全文与返工约束）。
+- 目标仓 `CLAUDE.md`（测试 fixture、真实配置保护规则）。
+- 源码：`jrnl/args.py`、`jrnl/controller.py`、`jrnl/commands.py`、`jrnl/main.py`。
+- 测试与数据：`tests/unit/test_parse_args.py`、`tests/data/configs/basic_onefile.yaml`、`tests/data/journals/basic_onefile.journal`。
+- 配置：`pyproject.toml`（ruff／black／tox 配置）。
+- 既有依赖环境：上一轮遗留的 `<deps-python>`（只用 `--version`、import 检查和 pytest；未读旧读者结果或作者解题记录）。
+- 未访问 a1dbv 页面、地图、TASKS、其他卡或旧结果；未使用任何账号、凭据或网络接口。
+
+## 核对（第二轮，非读者复核，2026-11-03）
+
+**结论：限定通过。** 本轮返工清单（缩写／别名、help/version 优先级、`--` 边界、修前失败／修后通过、未跑项披露）在隔离 worktree 内独立复算全部成立；但互斥检测仍有未修的“原 CLI 反例”，不能算完整验收。
+
+### 独立复算
+- diff 仍只有 `jrnl/args.py`、`tests/unit/test_parse_args.py` 和本记录；本记录为 90 行纯追加，首轮内容未回填、未改动。
+- 修前（`jrnl/args.py` 换回 `655d8a9`）：同一新测试 12 failed / 56 passed；对上游原版 `90de4948` 跑同一份新测试为 11 failed / 57 passed（help/version 与 `--` 用例在原版本就通过）。候选：68 passed。
+- 候选 CLI（临时 `<tmp-config>`／`<tmp-journal>`，`<deps-python>` 直调 `jrnl.main.run`）：11 个错误组合全部 exit 2，stderr 含 `argument --format: not allowed with argument --import` 或 `argument --export: not allowed with argument --import`；`--import --file`、stdin `--import`、`--format json`、`--format text` 均 exit 0；`--help`／`--version`／`--diagnostic` 与 `--import --format json` 同现仍 exit 0；`-- --import --format json` 作为正文 exit 0，`--format json -- --import` 作为检索 exit 0。
+- 与 `655d8a9` 对照：两个 `--` 合法输入在 `655d8a9` 均 exit 2，本轮恢复；`--imp`／`--form`／`--export` 在 `655d8a9` 走到 exit 1 旧路径，本轮 exit 2 且文案正确。
+- 套件：`tests/unit` 212 passed / 27 skipped；BDD 全量 497 passed / 17 skipped；定向 `-k "import or format"` 31 passed / 1 skipped；`ruff check .` 通过；`black --check .` 76 files unchanged。`poetry`／`tox` 不在本机，`poe lint` 的 `poetry check` 与 tox 路径未跑，与记录一致。
+- `#2120` 按任务要求沿用负责人 2026-11-02 22:17 UTC 的公开观察，未联网复核；页面解析提交／全文指纹原件缺失，记录已明确“无法恢复”，未用当前页面回填。
+
+### 未修反例（独立复现，均相对上游 `90de4948` 的原行为）
+1. `--import --config-override editor --format`：上游原版 exit 0（`argparse` 把 `--format` 当作 `--config-override` 的第二个值，正常导入），候选 exit 2。`--config-override editor --format=json` 同类；`--config-override editor --import --format json`（`--import` 作为值、`--format` 为独立导出）上游 exit 0，候选也 exit 2。
+2. `--import --list --format json`：上游原版 exit 0（`--list` 后置命令生效并输出 json），候选 exit 2。根因同属“裸参数预扫描”不认识值消费与后置命令覆盖。
+3. 读者记录把第 1 类的基线写成 exit 0；按本轮修改前的 `655d8a9` 实测为 exit 2，只有上游原版 `90de4948` 是 exit 0。
+
+### 卡点判定
+1. 「工作树已有候选且写者不明」→ **model**：附入页面已明确写“已有未提交候选但写者不明时，保留原树、不切基线、覆盖文件或清缓存；先核归属与允许范围，再在独立副本验证候选，别另造同题实现”。读者称页面未给规则属漏读，不是页面缺口。
+2. 「缺依赖且禁止安装如何发现已有隔离环境」→ **page（小缺口）**：页面已写“缺依赖且不能安装时保留未跑项”，但未写如何发现已有隔离环境；读者复用遗留 `<deps-python>`、未安装依赖，处理可接受。
+3. 「选项值本身像选项」→ **model**：残余反例真实存在，属“按实际 CLI 语义修互斥检测”未完全修完；读者已测到 `--config-override` 一类，但基线归属错误，且未覆盖 `--format=json`、`--import` 作为值、`--list` 后置覆盖等同类。
+4. Windows GBK 编码 → **model（环境诱发，已自行修正）**：首次 exit 1 是控制台编码而非 CLI 行为；设 `PYTHONUTF8=1`／`PYTHONIOENCODING=utf-8` 后 exit 0，读者已识别并纠正，不计为本轮失败项。
+5. 页面解析提交／指纹缺失 → **page（输入回执缺口，非读者）**：按任务要求明确“无法恢复”，未回填、未重跑，处理符合要求。
+6. `#2120` 状态 → **page（任务已给定观察）**：按要求沿用负责人公开观察、不联网复核，无缺陷。
+
+### 页面能否指导选路
+页面“已有入口能完成就保留”“先读项目规则、核工作树差量”“自己核 diff、重放原触发路径”足以指导选路与验证；本轮“保留当前会话”符合页面。附入页面已写出“已有未提交候选且写者不明”的处置规则，读者仍按旧印象称缺口。真正未覆盖的是“缺依赖且禁装时如何发现已有隔离环境”，建议补一句。缩写／别名／`--` 边界已修；`--config-override` 值消费与 `--list` 后置覆盖仍是未修反例，不影响本轮选路结论，但不支持“完整验收”。
+
+### 残留与未运行
+- 未提交、未推送、未切换分支、未改任务文件、未改页面与其他卡；临时配置／journal 只在临时目录。
+- 未运行：`poe lint` 的 `poetry check`、tox 路径（本机无 `poetry`／`tox`，按约束未安装）。
