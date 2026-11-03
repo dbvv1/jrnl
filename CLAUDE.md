@@ -48,10 +48,21 @@ Tests run in parallel by default (`-n=auto` via pytest-xdist). To disable for de
 
 User guide pages live in `docs/*.md`; the site is built with MkDocs from
 `mkdocs.yml`, and the contributor workflow is in `docs/contributing.md`.
-Preview edits with `poetry run poe docs-run`. CI also runs
-`poetry run poe docs-check`, an accessibility check that needs `npm install`
-and a docs server already running; if either is unavailable, report the
-check as unverified instead of claiming it passed.
+Preview edits with `poetry run poe docs-run`.
+
+The `Docs` workflow (`.github/workflows/docs.yaml`) runs the accessibility
+check `poetry run poe docs-check` against a docs server on port 8000. Its
+prerequisites are the existing Python/Poetry docs environment (`poetry
+install` or `poetry sync --no-root`, which provides `mkdocs` for `poe
+docs-run`), the Node dev dependencies including `pa11y-ci` from `package.json`
+(install with `npm install` only when `node_modules` is absent), a
+Puppeteer-managed Chrome matching that dependency (CI installs it with
+`npx puppeteer browsers install chrome` after `npm install`), and a running
+`poetry run poe docs-run` server.
+
+Do not install or download anything just to run this check. If a prerequisite
+is missing, inspect the CI configuration instead and report the check as
+unverified rather than claiming it passed.
 
 ## Architecture
 

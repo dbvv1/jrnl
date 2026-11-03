@@ -31,11 +31,13 @@ jrnl today at 3am: I just met Steve Buscemi in a bar! What a nice guy.
 !!! note
     Most shells contain a certain number of reserved characters, such as `#` and
     `*`. These characters, as well as unbalanced single or double quotation
-    marks, parentheses, and others, likely will cause problems. Although
-    reserved characters can be escaped using `\`, this is not ideal for
-    long-form writing. The solution: first enter `jrnl` and hit `return`. You
-    can then enter the text of your journal entry. Alternatively, you can [use
-    an external editor](./advanced.md).
+    marks, parentheses, and others, likely will cause problems. In POSIX/Bash-like
+    shells, reserved characters can be escaped using `\`, although this is not
+    ideal for long-form writing. In PowerShell, `\` does not escape; quote the
+    entry instead (see the PowerShell note under [Using Tags](#using-tags)).
+    The solution: first enter `jrnl` and hit `return`. You can then enter the
+    text of your journal entry. Alternatively, you can [use an external
+    editor](./advanced.md).
 
 You can also import an entry directly from a file:
 
@@ -80,7 +82,7 @@ jrnl Had a wonderful day at the @beach with @Tom and @Anna.
     because PowerShell passes the backslash through to `jrnl`. The same
     quoting protects other reserved characters such as `#` and `&`.
 
-For example, these pass `@beach` to `jrnl` in PowerShell:
+For example, these all pass the text `@beach` to `jrnl` in PowerShell:
 
 ```powershell
 jrnl `@beach
@@ -88,11 +90,22 @@ jrnl '@beach'
 jrnl "@beach"
 ```
 
-Quote the whole entry when it contains several tags:
+For a whole entry, use PowerShell literal single quotes so that `$`,
+backticks, `@`, `#` and `&` reach `jrnl` unchanged:
 
 ```powershell
-jrnl "Had a wonderful day at the @beach with @Tom and @Anna."
+jrnl 'Had a wonderful day at the @beach with @Tom and @Anna.'
 ```
+
+To include an apostrophe in a single-quoted entry, double it:
+
+```powershell
+jrnl 'It''s a $5 day at the `spot` @cafe #1 & @Tom.'
+```
+
+Double quotes still work for a lone tag, but PowerShell expands `$` variables
+and treats backticks as escapes inside them, so a double-quoted sentence can
+arrive at `jrnl` with characters missing.
 
 Although you can use capitals while tagging an entry, searches by tag are
 case-insensitive.

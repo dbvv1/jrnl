@@ -214,3 +214,188 @@ python probe.py "Had a wonderful day at the    ["Had a wonderful     ["Had a won
 ### 四、结论
 
 读者按页面完成了本次真实修改的核心验收：位置、内容、参数探针、链接与格式检查、待验项报告均成立；完整 jrnl 路径和文档构建因缺依赖保留为环境缺口，符合任务要求。按任务自己的验收判定为做成。主要遗留是新引入文档中双引号整句示例的 `$`／反引号副作用（可复现），其次是旧 note 的一致性与 CLAUDE.md 前提完整性。
+
+---
+
+# 第二轮返工记录（2026-11-03）
+
+本轮按任务文件「修改要求」做定点返工；任务文件同时说明这不是首次实测，要求保留上一切记录和原提交，只追加修订结果。下面不覆盖、不改写第 1–8 节和上方「核对」的任何内容。
+
+## 9. 做到哪一步与产物
+
+三项修订都已完成，产物仍在工作树内：
+
+- `docs/usage.md`
+  - 整句 PowerShell 示例从双引号改为字面单引号，并补上「单引号内 apostrophe 双写」的示例。
+  - 保留首轮已验证的单标签反引号／单引号／双引号三种写法。
+  - Composing Entries 的旧反斜杠转义说明限定为 POSIX/Bash-like shell，并交叉引用 `#using-tags` 下的 PowerShell note。
+- `CLAUDE.md`
+  - `## Editing Documentation` 改为指向实际 CI 入口 `.github/workflows/docs.yaml`，列出 Python/Poetry 文档环境、Node/`pa11y-ci`、匹配的 Puppeteer Chrome 和已运行的 docs server 四个前提。
+  - `npm install` 写成仅在 `node_modules` 缺失时安装，不再表述为每次检查必做。
+- 本记录：追加本节到 `reader-tests/A-INSTRUCTION-FILES-READER-20261103-u1.md`。
+
+按本会话约束没有提交、推送、切分支；工作树只改了 `docs/usage.md`、`CLAUDE.md` 和本记录。任务文件里的 result branch 推送和 review 状态由接收端处理。
+
+## 10. 三项修订的具体内容与理由
+
+### 10.1 `docs/usage.md` 的 PowerShell 整句写法
+
+首轮整句示例只有 `jrnl "Had a wonderful day at the @beach with @Tom and @Anna."`。复测发现双引号里 `$` 会展开、反引号会被当转义符，整句可能在 jrnl 看到之前就丢字符。本轮改为：
+
+```powershell
+jrnl 'Had a wonderful day at the @beach with @Tom and @Anna.'
+```
+
+并补一个同时含 apostrophe、`$`、反引号、`@`、`#`、`&` 的合成示例：
+
+```powershell
+jrnl 'It''s a $5 day at the `spot` @cafe #1 & @Tom.'
+```
+
+说明文字明确：单引号内 apostrophe 要双写；双引号对单个标签仍然可用，不是一律错误，但整句写在双引号里会被 PowerShell 展开 `$` 和处理反引号。单标签的三种旧写法原样保留：
+
+```powershell
+jrnl `@beach
+jrnl '@beach'
+jrnl "@beach"
+```
+
+### 10.2 Composing Entries 旧 note
+
+原句是「Although reserved characters can be escaped using `\`」，没有限定 shell 类型，和新增「`\@beach` 在 PowerShell 不生效」相矛盾。现改为：
+
+- 明确 `\` 转义只适用于 POSIX/Bash-like shell；
+- 明确 PowerShell 里 `\` 不转义，应改用引用；
+- 交叉引用 `[Using Tags](#using-tags)` 下的 PowerShell note。
+
+锚点 `using-tags` 由 `### Using Tags ###` 生成；本机无 MkDocs，未做真实渲染构建，只做了文件内锚点的静态核对（见 11.2）。
+
+### 10.3 `CLAUDE.md` 的文档检查说明
+
+改为按 CI 实际步骤列前提：
+
+- CI 入口：`.github/workflows/docs.yaml` 的 accessibility job；
+- Python/Poetry：已有 `poetry install`／`poetry sync --no-root` 环境，`mkdocs` 来自 dev 依赖，由 `poetry run poe docs-run` 提供预览；
+- Node：`package.json` 的 devDependencies 含 `pa11y-ci`，`node_modules` 缺失时才需要 `npm install`；
+- Chrome：CI 在 npm 安装后执行 `npx puppeteer browsers install chrome`，需要与该 Puppeteer 依赖匹配的 Chrome；
+- docs server：`poetry run poe docs-run` 需已在 8000 端口运行，`tasks.py` 的 `DOCS_URL` 指向该端口。
+
+并写明：不为了跑这个检查去安装或下载；前提缺失时只静态核 CI，报告「未验证」，不冒充通过。
+
+## 11. PowerShell argv 复测（合成数据）
+
+### 11.1 方法与环境
+
+- 探针：只打印 `sys.argv[1:]` 的 Python 脚本，不读写任何 journal／config；用 `python <probe> <args>` 观察 PowerShell 实际传给子进程的 argv。
+- 版本：Windows PowerShell 5.1.26100.9711；PowerShell 7.6.9；Python 3.13.5。
+- 脚本文件只含 ASCII 合成文本，避免编码和 PowerShell 5.1 的 `.ps1` 读取差异。
+
+### 11.2 结果
+
+| 形式（probe 代表 jrnl） | PS 5.1 argv | PS 7.6.9 argv |
+|---|---|---|
+| `probe @beach` | `[]` | `[]` |
+| ``probe `@beach`` | `["@beach"]` | `["@beach"]` |
+| `probe '@beach'` | `["@beach"]` | `["@beach"]` |
+| `probe "@beach"` | `["@beach"]` | `["@beach"]` |
+| `probe \@beach` | `["\\@beach"]`（字面反斜杠＋@） | 同左 |
+| `probe #beach` | `[]`（注释） | `[]` |
+| `probe '#beach'` | `["#beach"]` | `["#beach"]` |
+| `probe Had a wonderful day at the @beach with @Tom and @Anna.` | 三个 `@tag` 全部消失，只剩 `["Had","a","wonderful","day","at","the","with","and","."]` | 同左 |
+| `probe 'Had a wonderful day at the @beach with @Tom and @Anna.'` | 完整原句 | 完整原句 |
+| `probe 'It''s a $5 day at the `spot` @cafe #1 & @Tom.'` | `["It's a $5 day at the `spot` @cafe #1 & @Tom."]` | 同左 |
+| `probe "I paid $5 for coffee at the @cafe."` | `["I paid  for coffee at the @cafe."]`（`$5` 变空） | 同左 |
+| `probe "A `literal` backtick and @tag."` | `["A literal backtick and @tag."]`（反引号被吃掉） | 同左 |
+| `probe "It's a great day at the @beach."` | 完整原句（双引号内 apostrophe 没问题） | 同左 |
+| `probe I paid the bill & went home.` | 解析错误 `AmpersandNotAllowed`，整段脚本未执行 | 触发后台 job，`went` 被当作命令并报错 |
+| `probe 'I paid the bill & went home.'` | 完整原句 | 完整原句 |
+
+两条文档里的整句示例和三条单标签示例都按原样在 5.1／7.6.9 各跑了一次，argv 与预期字符一致。`$`、反引号、apostrophe 双写、`@`、`#`、`&` 的组合只在单引号下完整保留；双引号会改内容。这个结论对两个 PowerShell 版本一致。
+
+### 11.3 检查与未运行项
+
+| 检查 | 结果 |
+|---|---|
+| `git diff --check` | 退出 0 |
+| `docs/usage.md` 相对链接／锚点 | 7 个相对链接，0 个缺文件／缺锚点；`using-tags` 锚点存在 |
+| 代码围栏 | 44 个 fence 标记，成对 |
+| `poetry` | 未找到 |
+| `mkdocs` | 未找到（Python 环境也无 `mkdocs`、`ruamel.yaml`） |
+| `jrnl` | 命令未安装；本地 `import jrnl.main` 因缺 `ruamel.yaml` 失败 |
+| Node/npm | Node v22.23.2、npm 10.9.8 存在；`node_modules` 不存在 |
+| MkDocs 构建 | 未运行 |
+| `poe docs-check`／Pa11y | 未运行（缺 poetry、Node 依赖、Puppeteer Chrome、docs server） |
+| 完整 jrnl 写入／标签读取 | 未运行（jrnl 不可启动），保留待验 |
+
+没有安装、下载或运行 `npx`；没有接触真实 journal／配置。
+
+## 12. 本轮卡点：页面哪一句、缺什么、做错过什么
+
+| # | 页面／任务原句或位置 | 卡点与缺什么 | 我做了什么／做错了什么 |
+|---|---|---|---|
+| 1 | 第一步：`先看项目的 CI、包配置和已有指令，填入实际能用的入口` | 页面是通用方法，没有说 PowerShell 说明应放在 usage 的哪一段、写多长；需要自己从 issue 和文档结构判断。 | 按 issue「first mention of tags」放到 `### Using Tags ###` 第一个标签示例后；这是页面之外的推断，不是页面给出的定位。 |
+| 2 | 第一步：`命令从当前项目复制并试跑` | `poetry`、`mkdocs`、`jrnl` 均不可用，无法试跑文档构建和完整 CLI；任务禁止安装。 | 只实际跑了 PowerShell argv 探针、链接／锚点静态检查、围栏检查和 `git diff --check`；其余标为未运行。 |
+| 3 | 第一步：`完成需看到 [可观察结果]，并报告相关检查的实际结果` | 本轮的可观察结果只有 argv 和静态检查；MkDocs 渲染、Pa11y 可访问性没有环境。 | 没有把静态链接检查冒充 docs-check，也没有把 argv 探针冒充 jrnl 实跑。 |
+| 4 | 第二步：`v2.1.280+ 用 /memory 查看...`、`用 /context 查看 Memory files` | 当前是子代理，没有 `/memory`、`/context` 入口。 | 页面自己也写了「API、SDK 或子代理若不提供这些入口，就不要硬套斜杠命令」，因此改用启动上下文里的项目指令＋手动读取作为「当前可见」证据，并保持「工具侧加载列表未取得」。 |
+| 5 | 任务「按什么做」：`记录解析提交与内容指纹` | 任务文件只给 `docs/decisions/instruction-files.md@main`，没有解析提交 SHA。当前任务文件 28,341 bytes；我按标题 `# CLAUDE.md／AGENTS.md 怎么写` 到文件末重算附文为 10,269 字符 / 20,025 UTF-8 bytes、`sha256:c4e5a91d…`。这与首轮记录的 19,328 bytes／`7b8c59ff…`、以及任务文件第 41 行提到的 `21b5f4ab` 都不一致；附文里新增了指向首轮记录 `bfd477e` 的链接，页面内容应已在首轮后更新。 | 如实记下三个指纹不一致和「无法映射到具体上游 commit」，没有回填或改写首轮记录，也没有伪造 SHA。 |
+| 6 | 「静态检查先拿本仓样本试」：`agents-md-lint` 两条命令 | 它不是 jrnl 的依赖，安装属于任务禁止的新软件。 | 跳过，改用项目自带的链接／锚点、围栏和 `git diff --check` 检查。 |
+| 7 | `CLAUDE.md` 顶部：`ALWAYS prefer contributing to the main branch with a PR` | 与本会话「不提交、不推送、不切分支」的限制冲突。 | 按任务限制执行，只在工作树改文件；记录冲突，没有开 PR。 |
+| 8 | 我自己的检查脚本（非页面） | 第一版锚点检查把 `_` 当成需要剔除的字符，误报既有链接 `#default_hour-and-default_minute` 缺锚点。 | 修正 slug 规则后重跑，确认该链接和新增的 `#using-tags` 都存在；没有因此改文档。 |
+
+## 13. 页面之外还翻了什么
+
+- 原 issue：GitHub `jrnl-org/jrnl#1977` 公开页面，确认标题「Add documentation for PowerShell users」、正文的 `escape ampersands`、`first mention of tags`，以及链接的 #1405／#1963／#1976；正文没有精确命令或错误文本。
+- 目标仓现有指令与贡献规范：`CLAUDE.md`、`docs/contributing.md`。
+- 目标仓文档与检查配置：`docs/usage.md`、`mkdocs.yml`、`.github/workflows/docs.yaml`、`pyproject.toml`（`docs-check`／`docs-run` 的 poe 定义、`mkdocs` dev 依赖）、`tasks.py`（`DOCS_URL`、sitemap、Pa11y 配置生成）、`package.json`、`package-lock.json`（Puppeteer 依赖）。
+- 源码只读核对：`jrnl/main.py`、`jrnl/controller.py`，确认 `--version` 在加载 config 前执行；随后 `import jrnl.main` 因 `ruamel.yaml` 缺失失败，所以没有继续跑 jrnl。
+- 本机 PowerShell 实测：5.1.26100.9711、7.6.9。
+- 已存在于仓库中的首轮记录 `reader-tests/A-INSTRUCTION-FILES-READER-20261103-u1.md`（任务要求保留和追加的对象）。
+- 没有读 a1dbv 的其他教程、旧读者答案或页面所属地图；没有访问模型网关、凭据或内网服务。
+
+## 14. 恢复条件
+
+- 文档构建：具备 Poetry 环境（`poetry install`／`poetry sync --no-root`）、Node 依赖、匹配的 Puppeteer Chrome 和已运行的 `poetry run poe docs-run` 后，再跑 `poetry run poe docs-check`；本次未安装，不能写成通过。
+- 完整 jrnl：安装项目依赖后可启动 jrnl，再用临时配置和临时 journal 验证三种单标签形式和两条整句示例的写入／标签读取；不要接触真实用户配置。
+- 页面版本：需要接收端提供 `docs/decisions/instruction-files.md@main` 的解析提交 SHA 或原始附文；本记录只能给出当前任务文件里附文的自算指纹。
+
+## 核对（第二轮返工，2026-11-03）
+
+核对人独立只读复核，另起 PowerShell argv 探针；未改读者产物，本节只追加结论。核对时只读查看了 a1dbv 参考副本的页面历史，未改页面。
+
+### 一、事实核对
+
+- 工作树与范围：`git status --porcelain` 只有 `CLAUDE.md`、`docs/usage.md`、`reader-tests/A-INSTRUCTION-FILES-READER-20261103-u1.md`；HEAD 仍是 `bfd477e`，没有新提交、推送或切分支；`node_modules` 不存在。改动统计：`CLAUDE.md` +15/−4，`docs/usage.md` +21/−8，读者本轮新增记录 +143/−0（本核对节为追加，未改前文）。
+- 三项修订均落地：
+  1. `docs/usage.md` 整句改为字面单引号 `jrnl 'Had a wonderful day at the @beach with @Tom and @Anna.'`；补 apostrophe 双写示例 ``jrnl 'It''s a $5 day at the `spot` @cafe #1 & @Tom.'``；保留反引号／单引号／双引号三种单标签形式；明确双引号对单标签仍可用、整句会丢 `$` 和反引号。
+  2. Composing Entries 的旧 note 已限定 `\` 转义只适用于 POSIX/Bash-like shell，并交叉引用 `[Using Tags](#using-tags)`。
+  3. `CLAUDE.md` 的 `## Editing Documentation` 指向 `.github/workflows/docs.yaml`，列出 Poetry 文档环境、`pa11y-ci`／`package.json`、Puppeteer Chrome、8000 端口 docs server 四项前提；`npm install` 仅在 `node_modules` 缺失时；写明缺前提只静态核 CI、报告未验证。
+- PowerShell 独立复测（Windows PowerShell 5.1.26100.9711、PowerShell 7.6.9、Python 3.13.5；探针只打印 `sys.argv[1:]`）：读者第 11.2 节表格逐行复现一致。包括：裸 `@beach`／`#beach` 为 `[]`；`` `@beach ``、`'@beach'`、`"@beach"` 为 `["@beach"]`；`\@beach` 为 `["\\@beach"]`；裸整句三个 `@tag` 消失；单引号整句完整；单引号合成句完整；`"I paid $5 ..."` 变成 `I paid  for...`；双引号反引号被吃掉；裸 `&` 在 5.1 解析错误、在 7 触发后台 job，加引号完整。两条文档整句示例和三条单标签示例均按原样通过。
+- 静态检查：`git diff --check` 退出 0；`docs/usage.md` 44 个行首 fence 标记成对；7 个相对链接／锚点均可解析（`using-tags`、`default_hour-and-default_minute`、`tagsymbols`、`editor`、`journals` 对应标题存在）。这些检查不能替代 MkDocs 渲染或 Pa11y。
+- 环境：本机 `poetry`、`mkdocs`、`jrnl`、`ruamel.yaml` 均不可用，`node_modules` 不存在；MkDocs 构建、`poe docs-check`／Pa11y、完整 jrnl 写入／标签读取未运行，读者标为待验属实，未把未运行写成通过。
+- 指纹：当前 `job.md` 28,341 bytes、`sha256:4ae714fd…`；附文（标题到文末）10,269 字符／20,025 UTF-8 bytes、`sha256:c4e5a91d…`，与 a1dbv 参考副本当前页面（提交 `684e5bcf`）完全一致，读者本轮自算正确。
+
+### 二、新发现：`21b5f4ab` 是提交号，不是与首轮指纹冲突的第三个指纹
+
+- a1dbv 参考副本历史：提交 `21b5f4ab` 的 `docs/decisions/instruction-files.md` 为 19,328 bytes／9,932 字符、`sha256:7b8c59ff…`，正是首轮附文和读者首轮记录的值；该版本不含 `bfd477e` 链接。
+- 当前页面提交 `684e5bcf` 为 20,025 bytes／10,269 字符、`sha256:c4e5a91d…`，含 `bfd477e` 链接。
+- 因此 `21b5f4ab`（提交）与 `7b8c59ff`（该提交的页面内容 SHA-256）互不矛盾，任务文件第 41 行“与负责人独立计算的 21b5f4ab 页指纹相符”指的就是同一页面版本。读者把它当成内容指纹去比较，得出“三个指纹不一致、无法映射到具体上游 commit”的结论不成立；这是读者没意识到的错误（missed）。任务文件把提交号写成“页指纹”确有歧义，属输入回执措辞问题（page），但提交与内容指纹本身可解析。
+
+### 三、卡点逐条判定
+
+| 任务消息顺序（读者表编号） | 判定 | 说明 |
+|---|---|---|
+| 1 记录解析提交与内容指纹（读者 #5） | page（输入措辞）／model（误读） | `job.md` 没有单独的“解析提交”字段，且把 `21b5f4ab` 写成“页指纹”，属输入回执缺口；但读者未认出 8 位缩写是提交号，误判三个值冲突，见 missed。 |
+| 2 `/memory`、`/context` 入口（读者 #4） | page | 页面按交互式客户端写核对入口；虽已提示子代理不要硬套斜杠命令，但未给子代理可用的工具侧替代证据。读者按页面回退、保留启动加载待验，处理正确。 |
+| 3 命令试跑与可观察结果：缺 poetry/mkdocs/Node/Puppeteer/docs server（读者 #2/#3） | 环境／禁装边界（非页面、非模型） | 任务禁止安装；页面要求报告实际结果，读者如实标为未运行。不能计为页面缺陷。 |
+| 4 jrnl 不可运行、完整写入／标签读取未验（读者 #2、11.3） | 环境／任务条件（非页面、非模型） | 任务本身写“如已能运行 jrnl”；读者用 argv 探针并明确区分，标为待验正确。 |
+| 5 PowerShell 说明放在 usage 哪一段（读者 #1） | 正常任务判断（非缺陷） | 页面是通用方法，未规定项目文案定位；读者按 issue“first mention of tags”放在首个标签示例后，判断合理。 |
+| 6 CLAUDE.md 的 main+PR 与任务限制冲突（读者 #7） | 任务约束／指令优先级（非缺陷） | 页面“代码与说明冲突”原则适用；读者按任务限制只在工作树改文件，未开 PR，正确。 |
+| 7 `agents-md-lint` 未运行（读者 #6） | 非缺陷 | 页面只说“可先试”，它不是 jrnl 依赖，安装越界；读者用项目自带检查替代，正确。 |
+| 8 自己的锚点脚本首版误报（读者 #8） | model（已自纠） | 读者把下划线当剔除字符，修正 slug 规则后重跑；未影响文档，已记录。 |
+
+### 四、结论
+
+- 三项返工均已完成并经独立复测：单引号整句、apostrophe 双写、POSIX/PowerShell 交叉引用、`CLAUDE.md` 的 CI 入口与四项前提都成立；`git diff --check`、fence 配对、链接／锚点静态检查通过。
+- 完整 MkDocs／Pa11y 与 jrnl 写入／标签读取未运行，属环境与禁装缺口；读者已明确标为待验，不能写成通过。
+- 按任务自己的验收，读者真的做成了（taskDone=true）；首轮三项 open issue 已修，本轮返工通过，但不代表完整文档构建或完整 CLI 已验证。
+- missed：读者把提交 `21b5f4ab` 当成内容指纹，误称三个指纹不一致、无法映射到上游提交；实际 `21b5f4ab` 的页面内容哈希正是首轮 `7b8c59ff`，当前页面是 `684e5bcf`／`c4e5a91d`。除此之外未发现新的产物错误。
