@@ -5,6 +5,7 @@ from argparse import Namespace
 
 import pytest
 
+from jrnl.config import scope_config
 from jrnl.override import _convert_dots_to_list
 from jrnl.override import _get_config_node
 from jrnl.override import _get_key_and_value_from_pair
@@ -62,6 +63,39 @@ def test_override_dot_notation(minimal_config):
     overrides = {"config_override": [["colors.body", "blue"]]}
     apply_overrides(expected_args(overrides), minimal_config)
     assert minimal_config["colors"] == {"body": "blue", "date": "green"}
+
+
+def test_override_nested_journal_timeformat_with_percent():
+    """An unquoted strftime format must reach the journal-level config leaf.
+
+    "journals.default.timeformat: %d" is not valid YAML on its own, so
+    make_yaml_valid_dict falls back to the literal string. The dotted key must
+    still be expanded and applied inside the journal dict, and the other keys
+    must keep their values.
+    """
+    config = {
+        "timeformat": "%F %r",
+        "editor": "vim",
+        "journals": {
+            "default": {
+                "journal": "/tmp/journals/journal.jrnl",
+                "timeformat": "%F %r",
+            }
+        },
+    }
+    overrides = {"config_override": [["journals.default.timeformat", "%d"]]}
+
+    actual = apply_overrides(expected_args(overrides), config)
+
+    journal_conf = actual["journals"]["default"]
+    assert journal_conf["timeformat"] == "%d"
+    assert journal_conf["journal"] == "/tmp/journals/journal.jrnl"
+    assert actual["timeformat"] == "%F %r"
+    assert actual["editor"] == "vim"
+
+    scoped = scope_config(actual, "default")
+    assert scoped["timeformat"] == "%d"
+    assert scoped["journal"] == "/tmp/journals/journal.jrnl"
 
 
 def test_multiple_overrides(minimal_config):

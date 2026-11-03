@@ -221,3 +221,154 @@ PY_COMPILE_OK
 2. 吞掉全部 `YAMLError` 的口径变化未评估：如 `--config-override colors "{body: red"` 这类坏结构化值，旧行为在解析处抛 `ScannerError`，新行为静默把 `colors` 覆盖成字符串，稍后按 mapping 使用时才以无关的 `AttributeError` 等方式暴露；读者只讨论了 `%d`，未记录这一面。
 3. §8 恢复条件不完整：`pyproject.toml` 有 `required_plugins = ["pytest-bdd"]` 与 `addopts = ["-n=auto"]`（需 `pytest-xdist`），只装 pytest 仍会在启动期失败；读者的缺失工具清单漏了 `pytest-bdd`/`pytest-xdist`，所写 `pytest ... -k deserialize` 不能直接执行。
 4. 补丁注释「`%` starts a YAML directive」不准确：`%d` 不在行首，不是 directive，而是标量起始处的保留指示符；不影响行为，但作为长期留在代码里的注释是错的说法。
+
+---
+
+## 修订记录（2026-11-03 第二轮，定点补正；首轮正文不改）
+
+首轮 6b57614 的提交与上文章节保持原样，本文件只追加本节。开工前核对：`git status --porcelain` 为空，HEAD 仍为 `6b57614`，`git worktree list` 中本分支只有这一个工作树，未发现其他写者；未新建任务／读者，未改页面、地图、TASKS。
+
+### R1. 合法嵌套穿透回归（已补，未运行）
+
+复核意见 1 说原 `["colors.body", "%d"]` 只测 `make_yaml_valid_dict` 的平面中间结果。本轮在 `tests/unit/test_override.py` 新增：
+
+- `test_override_nested_journal_timeformat_with_percent`
+
+做法与断言：
+
+- 合成配置把 `journals.default` 设为字典：`{"journal": "/tmp/journals/journal.jrnl", "timeformat": "%F %r"}`，顶层另放 `timeformat="%F %r"`、`editor="vim"`；
+- 覆盖对为 `["journals.default.timeformat", "%d"]`，经 `apply_overrides(args, config)` 进入 `_convert_dots_to_list` → `_recursively_apply` 的真实配置树；
+- 断言嵌套叶值 `actual["journals"]["default"]["timeformat"] == "%d"`，同层 `journal` 路径、顶层 `timeformat` 与 `editor` 均保持原值；
+- 再接 `scope_config(actual, "default")`，断言作用域后顶层 `timeformat == "%d"`、`journal` 路径仍在。
+
+这样即使点号展开或 journal 级覆盖坏了，用例也会失败，而不像中间层用例那样仍通过。`tests/unit/test_parse_args.py` 原有的 `["colors.body", "%d"]` 参数保留不动（它是 `make_yaml_valid_dict` 的正确单测，但 `%d` 不是合法颜色，也不作为嵌套穿透验收）。
+
+回归性质：在基线 90de494 上，该覆盖对会在 `make_yaml_valid_dict` 内抛 `ScannerError`，到不了 `apply_overrides`；在 6b57614 上回退为字面字符串并落到 journal 叶。**这是按代码路径推导的预期，不是本机运行结果**（缺依赖，见 R4）。
+
+测试数量更正：6b57614 新增到 `tests/` 的是 3 个参数化案例（`timeformat %d`、`timeformat %Y-%m-%d %H:%M`、`colors.body %d`）加 1 个 mapping 案例，共 **4 个案例**，不是 5 个；本轮再加 1 个嵌套穿透案例，合计 5 个案例、4 个测试函数（其中一个函数参数化为 3 例）。首轮既有正确用例未删除。
+
+### R2. 注释／docstring（已改）
+
+- 旧注释写「`where "%" starts a YAML directive`」不准确：`%d` 不在行首，不构成 YAML directive；`%` 是保留指示符，不能作为未引用 plain scalar 的开头。
+- `make_yaml_valid_dict` 的 docstring 与 `except YAMLError` 注释已改写为：该 key:value 若不是合法 YAML（例如未引用的 strftime `"%d"`，因为 plain scalar 不能以保留指示符 `%` 开头），保留原始字面字符串而不抛错；jrnl 仍把它当作合法配置值使用。即明确「解析失败 → 回退为字面字符串」的回退语义。
+- 原修法（只捕 `YAMLError` 并回退）保留，未扩成全面配置类型系统。
+
+### R3. 坏输入边界（记录，未加测试）
+
+按负责人 2026-11-03 云端补验（同一真实 CLI，非本机）：
+
+| 输入 | 基线 90de494 | 候选 6b57614 | 退出码 |
+|---|---|---|---|
+| `--config-override colors "{body: red"`（未闭合 mapping） | `ParserError` | `AttributeError` | 两版均 1 |
+| `--config-override colors red`（YAML 合法但类型错误） | `AttributeError` | `AttributeError` | 两版均 1 |
+
+口径：前一行只是**坏输入**的失败位置／诊断从解析期前移到后续按 mapping 使用处；不能据此说候选破坏了合法的结构化覆盖，也不能把「吞掉全部 `YAMLError` 后回退」称作对所有输入都全面正确。合法结构化值（如 `colors "{body: red, title: blue}"`）在补丁后仍解析为 dict，这一点由 `test_deserialize_structured_value` 覆盖（本机未运行）。未为坏输入加断言测试：诊断类型依赖实现，需真实 CLI 才有意义。
+
+### R4. 环境、已运行检查与未运行原因
+
+本机（Python 3.13.5）实测可导入：`rich 15.0.0`、`colorama 0.4.6`、`python-dateutil`、`PyYAML 6.0.3`；缺 `ruamel.yaml`（含 clib）、`cryptography`、`keyring`、`parsedatetime`、`pyxdg`、`tzlocal`；开发侧缺 `pytest`、`pytest-bdd`、`pytest-xdist`、`ruff`、`black`、`poetry`、`tox`、`poe`；无 `.venv`。另检的 3.12.15 model-env 同样没有 `ruamel`、`pytest`、`pytest-bdd`、`xdist`，不作为可运行环境。
+
+已运行（仅静态）：
+
+```text
+$ python -m py_compile jrnl/config.py tests/unit/test_override.py tests/unit/test_parse_args.py
+PY_COMPILE_OK
+$ git diff --check
+DIFF_CHECK_OK
+$ git diff --numstat
+9	5	jrnl/config.py
+34	0	tests/unit/test_override.py
+```
+
+（上表是追加本节前采集的代码改动；最终工作树另含本文件 +112 行。）
+
+未运行及原因（按任务要求保留未运行，不安装、不以 AST／依赖桩／未知来源 wheel 替代）：
+
+```text
+$ python -m pytest --version
+<python>: No module named pytest
+
+$ python -c "import jrnl.config"
+    from ruamel.yaml import YAML
+ModuleNotFoundError: No module named 'ruamel'
+
+$ ruff --version
+/usr/bin/bash: line 1: ruff: command not found
+```
+
+- `pytest`／`poethepoet`：pytest 与项目运行时依赖均缺失；且 `pyproject.toml` 的 `required_plugins = ["pytest-bdd"]` 与 `addopts` 中的 `-n=auto` 还分别需要 `pytest-bdd`、`pytest-xdist`，不是「有 pytest 就齐备」。
+- 真实 `jrnl` CLI：`import jrnl.config` 先因缺 `ruamel` 失败，无法复现原失败／候选通过。
+- `ruff`／`black`：未安装。
+
+负责人云端补验（记为外部补验，不是本机成功）：2026-11-03 02:23:35–38 UTC 在隔离云端用既有 Python 3.12.14／jrnl 运行时，对 90de4948 与 6b57614a 各跑同一 10 个真实 CLI 输入；三种 strftime（含合法嵌套 `journals.default.timeformat`）由基线 exit 1 变候选 exit 0 并输出两条预期记录；布尔、数值、mapping、嵌套颜色与基线相同；20 次配置／journal 均逐字保留。pytest／ruff／black 与完整项目门槛仍未跑。
+
+### R5. 页面怎样支持本轮能力选择
+
+本轮补正仍不需安装任何 Skill／插件，页面判断未变：
+
+- 「已有工具够用就不装，项目已有 Skill 就复用」：复用仓库源码、既有单测与公开 issue／PR；项目没有相关 `SKILL.md`。
+- 「第一步先查已有能力」：补正是一次小的测试与注释改动，普通编辑足够。
+- Context7 行不适用：没有版本 API 疑问；窄 Skill 行不适用：ruamel 无对应窄 Skill；Serena 行不适用：只改一个小函数与一个测试；Superpowers 行明确「别只为清楚的小 bug 新装整套」。
+- 「先定位实际依赖，再选文档或源码」：继续用源码路径 `controller.apply_overrides → override → config.make_yaml_valid_dict` 定位。
+- 「用 [项目原测试命令或操作] 验收」：本机仍缺前置，未执行，见 R4。
+- 所选资料／能力是否真正用上：真正用上的只有仓库源码（`config.py`／`override.py`／`controller.py`／`args.py`）、既有测试、`pyproject.toml` 与 git 状态；未用上任何 Skill／插件／MCP，也未安装或验证自动加载，相关能力保留待验，不据此声称产品优劣。
+
+### R6. 卡点（本轮）
+
+- 页面句「**✅ 查实际行为，从调用方追到已解析包、项目补丁和具体模块……**」后的配方仍只有 Cargo／Node，缺 Python／pip／poetry 等价入口——沿用首轮记录，本轮未新增。
+- 页面句「**确定采用后，用 [项目原测试命令或操作] 验收任务结果。**」仍未写运行前置（项目运行时、pytest-bdd、pytest-xdist）；本机缺这些，按任务保持未运行。
+- 输入仍只给 `@main`、未附解析提交 SHA；本轮重算页面正文指纹仍为 15191 字符／24162 字节／SHA-256 `e3cb8f3a7d81e54a49614d7713ab084ce2a2cfeab31d200301d1ffac2139c353`，与首轮一致，说明页面内容未变，但仍无法回填派发时提交。
+- 环境限制（R4）是任务前置，不是页面表述；未换通道、未安装。
+- 读者侧更正：首轮嵌套用例覆盖不足与「5 个」计数已在本轮改正，见 R1；无其他新增误解。
+- 本轮做错过：先按常见安装目录假设另有一个 Python 3.12 解释器，实际不在；随后用 Python launcher 定位到 3.12.15 的 model-env，确认它同样缺依赖。未重复首轮的全盘 `find`，也未跨用户或他人工作树找环境。
+
+### R7. 页面之外还翻了什么（本轮）
+
+- `jrnl/config.py`（`make_yaml_valid_dict`、`scope_config`）、`jrnl/override.py`（`apply_overrides`、`_convert_dots_to_list`、`_recursively_apply`）、`jrnl/controller.py`（apply→scope 调用顺序）、`jrnl/args.py`（`--config-override` 为 nargs=2 append）。
+- `tests/unit/test_override.py`、`tests/unit/test_parse_args.py`、`pyproject.toml` 的 pytest 配置与依赖清单。
+- `git status`／`git worktree list` 确认单写者与分支状态。
+- 未读 a1dbv 其他教程／地图／TASKS／旧实测结果，未搜其他读者工作树，未探查 pip 缓存或其他私人材料；未新增外部资料。
+
+### R8. 当前状态
+
+- 工作树相对 6b57614 的改动：`jrnl/config.py`（+9/−5）、`tests/unit/test_override.py`（+34）、本文件追加本节。
+- 未提交、未推送、未切换分支；页面文件未改。
+- taskDone 仍未达成：本机真实 CLI、pytest、ruff／black 未运行；合法嵌套穿透的端到端证据仍只能引用负责人云端补验，不能算本机实跑。
+- 恢复条件：具备项目运行时（含 `ruamel.yaml` 等）＋ `pytest`＋`pytest-bdd`＋`pytest-xdist` 后，先跑 `tests/unit/test_override.py::test_override_nested_journal_timeformat_with_percent` 与 `tests/unit/test_parse_args.py::TestDeserialization`，再按首轮 §8 的 CLI 步骤复现原失败／候选通过并核对临时 journal 与无关配置保留，最后跑 ruff／black 与完整测试。
+
+---
+
+## 核对（第二轮修订，2026-11-03，非读者复核）
+
+核对人在本工作树独立核对，不采信读者自报；未安装任何依赖，也未用 AST、依赖桩或 wheel 替代真实 CLI。
+
+### 一、按任务验收：仍未做成
+
+- 任务要求真实 CLI 用同输入复现字符串覆盖、原失败／候选通过、pytest 与 ruff／black、临时 journal 与无关配置保留。本轮只有静态证据：`python -m py_compile jrnl/config.py tests/unit/test_override.py tests/unit/test_parse_args.py` 通过，`git diff --check` 通过；`import jrnl.config` 仍因 `ModuleNotFoundError: No module named 'ruamel'` 失败。
+- 本机 Python 3.13.5 可导入 `rich 15.0.0`、`colorama 0.4.6`、`python-dateutil 2.9.0.post0`、`PyYAML 6.0.3`；缺 `ruamel.yaml`、`cryptography`、`keyring`、`parsedatetime`、`pyxdg`、`tzlocal`、`pytest`、`pytest-bdd`、`pytest-xdist`、`poetry`、`ruff`、`black`、`tox`、`poe`，无 `.venv`；Python 3.12.15 model-env 同样缺 `ruamel` 与 pytest 系插件。与读者 R4 一致。
+- 因此 taskDone=false 成立；负责人云端补验是消费者补验，不能算读者本机做成。
+
+### 二、独立核到的证据
+
+1. HEAD 仍为 `6b57614`；工作树仅 3 个修改文件：`jrnl/config.py`（+9/−5）、`tests/unit/test_override.py`（+34）、本记录（+114）。未提交、未推送、未切分支，未改依赖／锁文件／页面。
+2. `6b57614` 的 `jrnl/config.py` 补丁与公开 PR #2110 的 `.diff` 逐字一致（`from ruamel.yaml.error import YAMLError`、try/except、回退字面字符串）。复核 PR／issue 当前状态：PR #2110 open、1 commit、无 review／assignee／milestone；issue #2011 open、Unplanned，复现命令与 `ScannerError` line 1 column 13 相符。
+3. 新测试 `test_override_nested_journal_timeformat_with_percent` 逻辑核对：`expected_args` → `apply_overrides` → `make_yaml_valid_dict`（`%d` 触发回退）→ `_convert_dots_to_list(["journals","default","timeformat"])` → `_recursively_apply` 改到 journal 叶；再断言同层 `journal`、顶层 `timeformat`／`editor`，并接 `scope_config`。按源码路径该测试在候选上应通过，在基线 90de494 上会在解析处抛 `ScannerError`；此为推导，未运行。
+4. 页面指纹与参考副本一致：15191 字符／24162 字节／SHA-256 `e3cb8f3a…c353`，正文完整；仍无解析提交 SHA。
+5. 测试数量：`6b57614` 新增 3 个参数化案例 + 1 个 mapping 案例 = 4 个案例、2 个测试函数；本轮新增 1 个案例、1 个测试函数；合计 5 个案例、3 个测试函数。
+6. 用本机 PyYAML 复跑读者 §6 的辅助核对，结果逐条一致（三个 `%` 输入均 `ScannerError`，布尔／数值／mapping 正常）。
+
+### 三、卡点逐条判断
+
+| 读者卡点 | 判断 | 依据 |
+|---|---|---|
+| 页面验收句未写运行前置，本机缺运行时与 pytest 系插件、任务禁止安装 | page | 属“前提没写”；负责人补充认为更接近环境／任务前置，但页面确实未交代前置，读者记录与不绕过正确。 |
+| 页面只有 Cargo／Node 依赖定位配方，缺 Python／pip／poetry 等价入口 | page | 缺信息；读者用手工探测替代并完成定位。首轮全盘 `find` 超时是读者低效，已自纠，不是主要卡点。 |
+| 页面引用 `@main` 未附解析提交 SHA | page | 输入／页面版本未固定；正文指纹与参考副本一致，本轮无内容差异影响。 |
+| 坏输入边界本机无真实 CLI 无法复现 | page | 环境前置缺失；读者按负责人云端补验记录失败位置／诊断变化，未夸大为合法覆盖回归，处理正确。 |
+| Skill／插件安装与自动加载未验证 | page | 非本轮缺陷：任务明确不要求试装整包，读者保留待验、未据此评优劣，符合要求。 |
+
+### 四、读者未意识到的错误
+
+1. 测试计数：R1／R4 写“合计 5 个案例、4 个测试函数”不对。实为参数化函数 3 例 + mapping 函数 1 例 + 嵌套函数 1 例 = 5 个案例、3 个测试函数。
+2. 行数：R4 写“最终工作树另含本文件 +112 行”，实际 `git diff --numstat` 为 114 行（首轮 223 行 + 114 = 337 行）。
+3. 输出来源：R4“已运行”块里的 `PY_COMPILE_OK`、`DIFF_CHECK_OK` 与 `<python>: No module named pytest` 是归一化标注，不是命令原样输出；`py_compile` 与 `git diff --check` 成功时静默。任务要求“记录准确输出”，应把原样输出与结论标注分开。

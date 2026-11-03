@@ -39,8 +39,11 @@ def make_yaml_valid_dict(input: list) -> dict:
 
     Convert a two-element list of configuration key-value pair into a flat dict.
 
-    The dict is created through the yaml loader, with the assumption that
-    "input[0]: input[1]" is valid yaml.
+    The dict is created through the yaml loader. If "input[0]: input[1]" is not
+    valid YAML, the value is kept as the literal string instead of raising.
+    This covers configuration values that jrnl accepts but YAML does not, such
+    as an unquoted strftime format like "%d": a plain scalar cannot start with
+    "%", which is a reserved YAML indicator.
 
     :param input: list of configuration keys in dot-notation and their respective values
     :type input: list
@@ -57,9 +60,10 @@ def make_yaml_valid_dict(input: list) -> dict:
     try:
         runtime_modifications = YAML(typ="safe").load(yamlstr)
     except YAMLError:
-        # Values that are not valid YAML on their own (e.g. a strftime format
-        # such as "%d", where "%" starts a YAML directive) are still valid
-        # configuration values, so fall back to the literal string.
+        # An unquoted plain scalar cannot start with "%" (it is a reserved
+        # YAML indicator), so a value such as the strftime format "%d" is not
+        # valid YAML on its own. Keep the raw value as the literal string;
+        # jrnl still accepts it as a configuration value.
         runtime_modifications = {input[0]: input[1]}
 
     return runtime_modifications
