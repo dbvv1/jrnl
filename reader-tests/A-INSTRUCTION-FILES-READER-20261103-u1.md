@@ -399,3 +399,104 @@ jrnl "@beach"
 - 完整 MkDocs／Pa11y 与 jrnl 写入／标签读取未运行，属环境与禁装缺口；读者已明确标为待验，不能写成通过。
 - 按任务自己的验收，读者真的做成了（taskDone=true）；首轮三项 open issue 已修，本轮返工通过，但不代表完整文档构建或完整 CLI 已验证。
 - missed：读者把提交 `21b5f4ab` 当成内容指纹，误称三个指纹不一致、无法映射到上游提交；实际 `21b5f4ab` 的页面内容哈希正是首轮 `7b8c59ff`，当前页面是 `684e5bcf`／`c4e5a91d`。除此之外未发现新的产物错误。
+
+---
+
+# 第三轮定点修订记录（2026-11-03）
+
+本轮按任务文件「修改要求」只做一处定点返工，不是新读者首次实测。不覆盖、不改写第 1–14 节和两轮「核对」；`docs/usage.md` 以及首轮、二轮已核通过的内容原样保留，未重跑 Windows／PowerShell 探针，未重读首次流程，也未再计算或改写指纹结论。工作树停在 `7572c11`，首轮 `bfd477e`、二轮 `7572c11` 的提交与 u1 全部原记录均保留。
+
+## 15. 做到哪一步与产物
+
+- 修改 `CLAUDE.md` 的 `## Editing Documentation` 最后两段：把「禁装」从永久规则改成按当前任务授权的条件分支，并去掉「仅 `node_modules` 缺失才可安装」的永久条件。这是本轮唯一的产品改动。
+- 追加本节到 `reader-tests/A-INSTRUCTION-FILES-READER-20261103-u1.md`。
+- 未改 `docs/usage.md`、未改其他文档页、未新建 `AGENTS.md`、未改生产代码／依赖／`tasks.py`／`mkdocs.yml`；未提交、未推送、未切分支、未安装或下载任何东西。
+
+## 16. 修改前后
+
+修改前（二轮提交的状态）：
+
+- `(install with npm install only when node_modules is absent)`：把「目录存在」当成依赖完整、浏览器就绪的充分条件。
+- `Do not install or download anything just to run this check.`：把本轮任务的 no-install 约束固化成项目永久规则，和同一段前文的正常 setup 前提冲突。
+
+修改后：
+
+- 仍保留 `.github/workflows/docs.yaml` 这一 CI 入口和四项准确前提：Python／Poetry 文档环境（`poetry install` 或 `poetry sync --no-root`，提供 `mkdocs`）、`package.json` 中的 Node 依赖且含 `pa11y-ci`、与该依赖匹配的 Puppeteer Chrome（CI 用 `npx puppeteer browsers install chrome`）、运行中的 `poetry run poe docs-run`。
+- 新增：检查前这些依赖、匹配浏览器和 docs server 必须已具备，但不要求每次重装；删除了「仅在 `node_modules` 不存在时才 `npm install`」的表达，避免目录存在但依赖不全时误判。
+- 新增条件分支：安装或下载是否允许以当前任务的授权为准；当前任务禁止时不执行 setup，缺前提就静态核对 CI 并把检查记为未验证；任务允许时按 CI job 的方式准备环境。
+
+## 17. 实际检查与未运行项
+
+| 检查 | 结果 |
+|---|---|
+| `git diff --check` | 退出 0 |
+| `git status --porcelain` | 仅 `CLAUDE.md`、`reader-tests/A-INSTRUCTION-FILES-READER-20261103-u1.md` |
+| `git diff --stat` | `CLAUDE.md` +7／−5；本记录为追加 |
+| `docs/usage.md` 是否改动 | 未改动，仍为二轮已核版本 |
+| MkDocs 构建 | 未运行（无 mkdocs 环境，本轮禁装） |
+| `poetry run poe docs-check`／Pa11y | 未运行（缺 poetry、Node 依赖、Puppeteer Chrome、docs server） |
+| 完整 jrnl 写入／标签读取 | 未运行（jrnl 不可启动，依赖缺失） |
+| PowerShell argv 探针 | 按任务要求未重跑 |
+
+文档构建、可访问性检查和完整 CLI 仍按未运行处理，不写成通过；云端已验范围也没有拿来冒充本机 Windows 宿主或完整门禁。
+
+## 18. 本轮卡点：页面哪一句、缺什么、做错过什么
+
+| # | 页面／任务原句或位置 | 卡点与缺什么 | 我做了什么／做错了什么 |
+|---|---|---|---|
+| 1 | 任务「修改要求」：`CLAUDE.md 的“Do not install or download anything just to run this check” ... 改成条件分支` | 只给了改动方向和两个分支语义，没有给可直接替换的完整措辞；页面也没有「如何在项目指令里表达安装授权」的模板。 | 按修改要求自行组织措辞，保留原四项前提，只替换授权与重装相关的句子。这是任务之外的写作判断。 |
+| 2 | 任务「修改要求」：`不要把“仅 node_modules 不存在才可安装”固化为永久条件` | 页面通用方法没有讨论依赖目录存在但内容不完整的情况，只能按任务要求补。 | 拟定措辞时先沿用「缺 Node 依赖才 `npm install`」的句式，发现这仍把安装动作留成项目规则，改为「检查前依赖须已具备、不要求每次重装、是否安装看当前任务授权」。这一调整只发生在措辞设计阶段，没有写入错误版本。 |
+| 3 | 页面第一步：`命令从当前项目复制并试跑`、`完成需看到 [可观察结果]` | 本机仍无 poetry、mkdocs、Node 依赖、Puppeteer Chrome、docs server 和可启动的 jrnl；本轮又明确禁装。 | 只做了 diff、状态和范围核对；没有试跑文档构建或 Pa11y，如实标为未运行。 |
+| 4 | 页面第二步：`v2.1.280+ 用 /memory ...`、`用 /context 查看 Memory files` | 当前仍是子代理，没有这些工具侧入口（与首轮、二轮相同，未新增缺口）。 | 沿用既有记录，不再重复取证，也不把复述当加载证据。 |
+| 5 | `CLAUDE.md` 顶部：`ALWAYS prefer contributing to the main branch with a PR` | 与本轮「不提交、不推送、不切分支」限制冲突。 | 按任务限制只在工作树改文件，未做任何 git 写操作。 |
+| 6 | 任务「按什么做」：`记录解析提交与内容指纹` | 本轮修改要求明确不重读首次流程、不因指纹误读再造输入；任务文件仍只有 `@main`，没有独立解析提交字段。 | 保留前两轮记录原文与负责人已给的更正结论，不重算、不回填，也不把提交号当内容指纹。 |
+
+## 19. 页面之外还翻了什么
+
+- 目标仓 CI 与检查配置：`.github/workflows/docs.yaml`（accessibility job 的实际步骤：`poetry sync --no-root`、`npm install`、`npx puppeteer browsers install chrome`、后台 `poe docs-run`、`poe docs-check`）。
+- 包与任务配置：`package.json`（devDependencies `pa11y-ci` 4.0.0）、`pyproject.toml`（`mkdocs >=1.4`、`docs-check` 的 sequence、`docs-run` 为 `mkdocs serve`）、`tasks.py`（`DOCS_URL` 为 8000 端口、sitemap 与 Pa11y 配置生成）。
+- 工作树状态：`git log`、`git status`、`git diff`，用于确认基于 `7572c11`、单写者、范围仅两个文件。
+- 未读 a1dbv 的其他教程、旧读者答案或页面所属地图；未访问模型网关、凭据或内网服务。
+
+## 20. 恢复条件
+
+- 文档检查：在允许安装且具备 Poetry 文档环境、`package.json` 的 Node 依赖、匹配的 Puppeteer Chrome 与运行中的 `poetry run poe docs-run` 后，运行 `poetry run poe docs-check`；本轮未安装，不能记为通过。
+- 完整 jrnl：安装项目依赖后，用临时配置与临时 journal 验证文档中的单标签和整句写法；不要接触真实用户配置。
+- 页面版本：仍需接收端提供 `docs/decisions/instruction-files.md@main` 的独立解析提交回执；本轮按要求未重算指纹。
+
+## 核对（第三轮定点修订，2026-11-03）
+
+核对人独立只读复核；本节只追加，未改读者第 1–20 节与前两轮核对。核对只运行 git 只读命令并读取项目内的 CI／配置，未改读者产物。
+
+### 一、事实核对
+
+- 基线：HEAD `7572c118` 与任务 `base_ref` 相同，`7572c118..HEAD` 无提交；分支 `receiver/A-INSTRUCTION-FILES-READER-20261103` 与其上游 `origin/relay/a-instruction-files-reader-20261103` 都指向 `7572c118`，没有新提交、推送或切分支。
+- 改动范围：`git status --porcelain --untracked-files=all` 只有 `CLAUDE.md` 与 `reader-tests/A-INSTRUCTION-FILES-READER-20261103-u1.md`；`git diff -- docs/usage.md` 为空，工作树仍是 `7572c11` 已提交的二轮版本（单引号整句、`It''s` 双写、三种单标签写法、POSIX 限定与 `#using-tags` 互链均未变）。没有新建 `AGENTS.md`，未改 `tasks.py`、`mkdocs.yml`、生产代码或依赖；无 `node_modules`、`.venv`、`sitemap.xml`、`config.json`。
+- `CLAUDE.md`：`git diff --numstat` 为 +10／−7，单一 hunk。删除的是 `(install with npm install only when node_modules is absent)` 与 `Do not install or download anything just to run this check...` 两句；新增的是「依赖、匹配浏览器和 docs server 检查前须已具备、不要求每次重装」，以及按当前任务授权分支：禁止安装／下载时不执行 setup、缺前提只静态核 CI 并记未验证，允许时按 CI job 方式准备环境。`.github/workflows/docs.yaml`、Python/Poetry、Node／`pa11y-ci`、Puppeteer Chrome、运行中的 docs server 四项前提都保留。
+- 项目配置复核：`docs.yaml` 的 accessibility job 依次执行 `poetry sync --no-root`、`npm install`、`npx puppeteer browsers install chrome`、后台 `poetry run poe docs-run`、`poetry run poe docs-check`；`package.json` 的 devDependencies 含 `pa11y-ci` 4.0.0；`pyproject.toml` 的 dev 依赖含 `mkdocs >=1.4`，`docs-check` 最终调用 `npx pa11y-ci`；`tasks.py` 的 `DOCS_URL` 指向 8000 端口。`CLAUDE.md` 的 CI 入口与四项前提和项目一致。
+- 记录：读者本轮追加为 +64／−0，`git diff -U0` 当时显示新内容从原第 402 行起纯追加 64 行、无删除；本核对节再加 37 行，合并后 `git diff --numstat` 为 +101／−0。第 1–14 节和两轮核对原文未变。
+- 检查：`git diff --check` 退出 0。
+- 环境：`poetry`、`mkdocs`、`jrnl` 不在 PATH，`ruamel.yaml` 缺失，无 `.venv`；Node v22.23.2／npm 10.9.8 存在但无 `node_modules`。MkDocs 构建、`poe docs-check`／Pa11y、完整 jrnl 写入／标签读取未运行，读者标为待验属实，没有把未运行写成通过。工作树内没有安装或下载留下的产物，也未发现运行 `npx` 的痕迹。
+
+### 二、读者第三轮卡点逐条判定
+
+| 读者 # | 判定 | 说明 |
+|---|---|---|
+| 1 缺可直接替换的措辞／页面无安装授权模板 | page（轻） | 输入只给方向与两分支语义，未给完整措辞；页面也没有模板。读者自行组织的措辞与要求一致，未造成产物错误。 |
+| 2 `node_modules` 条件的措辞 | model（草稿自纠） | 读者先沿用「缺 Node 依赖才 `npm install`」的句式，随后自行改为「依赖须已具备、不要求每次重装、是否安装看任务授权」，未写入错误版本。 |
+| 3 缺 poetry／mkdocs／Node 依赖／Puppeteer Chrome／docs server | 环境与禁装边界 | 不是页面缺信息，也不是读者能力问题；任务允许保留环境缺口，读者如实标为未运行。 |
+| 4 子代理无 `/memory`、`/context` | page | 页面按交互式客户端写核对入口，虽已提示子代理不要硬套斜杠命令，但未给可用的工具侧替代证据；读者沿用前两轮回退方式，处理正确。 |
+| 5 `CLAUDE.md` 的 main+PR 偏好与不提交／不推送／不切分支冲突 | 任务约束／指令优先级 | 不是页面或读者缺陷；读者按任务限制只在工作树改文件，正确。 |
+| 6 任务无独立解析提交字段 | page（输入回执） | `job.md` 仍只有 `page: ...@main`，没有独立解析提交 SHA；本轮按要求不重算、不回填，保留负责人更正结论，未造新错。 |
+
+### 三、读者没意识到的错误
+
+1. 第 17 节把 `git diff --stat` 的结果记成 `CLAUDE.md` +7／−5；实际 `git diff --numstat` 为 +10／−7（`git diff --stat` 显示 17 处变更，10 insertions／7 deletions），即前提段落改写新增 3 行、授权分支新增 7 行，共删除 4 + 3 行。这是自报检查结果与最终工作树不一致，不影响文档产物，但应在记录中更正。
+
+除这一处外，未发现本轮新增的产物错误；上一轮把页面提交 `21b5f4ab` 当成内容指纹的 missed 已由负责人更正，读者本轮按要求保留原文、未再重算，不重复计入。
+
+### 四、结论
+
+- 本轮两项修改要求均已落地且经独立核对：永久禁装句改为按当前任务授权的条件分支；「仅 `node_modules` 缺失才安装」的固化条件删除；四项准确前提与 CI 入口保留；`docs/usage.md` 未动，范围与 no-install 限制遵守。
+- MkDocs 构建、Pa11y 与完整 jrnl 写入／标签读取仍因环境缺依赖未运行，不能写成通过；这属环境与禁装边界，不是本轮修订失败。
+- 按本轮任务自己的验收，读者做成了这次定点修订（taskDone=true，仅指修订本身；不代表完整文档／CLI 验收）。

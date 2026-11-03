@@ -52,17 +52,20 @@ Preview edits with `poetry run poe docs-run`.
 
 The `Docs` workflow (`.github/workflows/docs.yaml`) runs the accessibility
 check `poetry run poe docs-check` against a docs server on port 8000. Its
-prerequisites are the existing Python/Poetry docs environment (`poetry
-install` or `poetry sync --no-root`, which provides `mkdocs` for `poe
-docs-run`), the Node dev dependencies including `pa11y-ci` from `package.json`
-(install with `npm install` only when `node_modules` is absent), a
+prerequisites are the Python/Poetry docs environment (`poetry install` or
+`poetry sync --no-root`, which provides `mkdocs` for `poe docs-run`), the
+Node dev dependencies including `pa11y-ci` from `package.json`, a
 Puppeteer-managed Chrome matching that dependency (CI installs it with
 `npx puppeteer browsers install chrome` after `npm install`), and a running
 `poetry run poe docs-run` server.
 
-Do not install or download anything just to run this check. If a prerequisite
-is missing, inspect the CI configuration instead and report the check as
-unverified rather than claiming it passed.
+The dependencies, the matching browser, and the docs server must be present
+before the check; they do not need to be installed again for every run.
+Whether installing or downloading is allowed depends on the current task's
+authorization. If the current task forbids installs or downloads, do not run
+setup: when a prerequisite is missing, inspect the CI configuration instead and
+report the check as unverified rather than claiming it passed. If the task
+allows it, prepare the environment the way the CI job does.
 
 ## Architecture
 
