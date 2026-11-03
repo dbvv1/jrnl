@@ -399,3 +399,133 @@ CLI 实测（临时 config／journal，`<deps-python>` 直调 `jrnl.main.run`）
 
 ### 页面能否指导选路
 页面“已有入口能完成就保留”“先读项目规则、核工作树差量”“自己核 diff、重放原触发路径”足以指导本次选路与验证；本轮“保留当前会话”符合页面。真正未覆盖的仍是“缺依赖且禁装时如何发现已有隔离环境”，可补一句；`--config-override` 值消费与 `--list` 后置覆盖已按实际 argparse 语义修好，不再有需页面补充的方法缺口。
+
+## 修订（第四轮，2026-11-03）
+
+> 本轮沿原 result_branch 从 `9340d81` 定点修一个已复现的 help 参数顺序回归，不是新读者实测。首轮、第二轮的记录、第三轮修订与历次非读者核对原文原样保留，本段只追加本轮的修订、更正和实测结果。起手 `git status` 干净，HEAD 为 `9340d81`，分支 `receiver/A-AGENT-CHOICE-READER-20261103`，单一写者；未提交、未推送、未切分支、未改任务文件。
+
+### 1. 入口与做法
+
+继续按页面《30 秒结论》“**已有入口能完成任务就保留；只有缺少必要能力或验收反馈时才换**”和《第一步》“**已经处于能读仓库、改文件和运行检查的会话，就直接继续；不必另启动一个 CLI**”选择**保留当前会话**。本会话可见客户端为 Claude Code 形态的 headless workflow 子代理，会话显示后端模型 `deepseek-v4.1-flash[1m]`，未显示 `--model`／`--effort` 覆盖，effort 记未知；没有为照抄型号改账户或配置，也没有另起 Codex／Cursor／云端入口。
+
+本轮只改一个点：恢复 `--format <非法值> --help` 在基线 `90de4948` 与修前 `7875131` 的 exit 2。`9340d81` 把格式值校验移到 argparse 解析之后，而 argparse 在读到 `--help` 时立即打印帮助并退出，导致 help 之前已消费的非法格式被跳过。修法沿用 `9340d81` 的“真实解析 + action 记录 + 最终 `postconfig_cmd` 互斥”结构，不恢复 raw token 预扫描：
+
+- 从 `validate_export_format()` 拆出 `validate_export_format_values()`：只逐次校验 `ExportFormatAction` 实际记录下来的 `--format`／`--export` 值，报原来的 `invalid choice` 文案。
+- 新增 `ExportHelpAction(argparse._HelpAction)`：在打印帮助前先调用 `validate_export_format_values()`，只检查“走到 --help 之前已经被 argparse 消费并记录”的格式值。该 action **不**调用包含最终互斥判断的完整 `validate_export_format()`，因此 `--import --format json --help` 仍按原优先级打印帮助。
+- `--help` 与 `-h` 注册同一个 `ExportHelpAction`，语义一致。
+- 最终解析完成后的 `validate_export_format()` 仍先按 `postconfig_cmd` 判断 `--import` 互斥，再做格式值校验；值消费、`--` 边界、缩写、别名与后置 `--list` 的处理不变。
+- 未改 `jrnl/controller.py`、`jrnl/messages/MsgText.py`、依赖声明、页面、扫描器或权限设置。
+
+新增回归（`tests/unit/test_parse_args.py`，2 个参数化用例 × `--help`／`-h` 共 4 个 case）：
+
+- `--format whatformats --help`、`--format whatformats -h`：exit 2，stderr 含 `invalid choice: 'whatformats'`。
+- `--help --format whatformats`、`-h --format whatformats`：exit 0，stdout 含 `usage:`。
+
+### 2. 实际命令与结果
+
+统一使用前几轮遗留的隔离依赖环境（占位 `<deps-python>`，含 pytest 9.1.1 与全部运行依赖；本轮只复用、未安装、未更新任何本机软件／依赖，也未读其中旧读者的结果文件）。CLI 一律经 `jrnl.main.run` 直调、显式 `--config-file <tmp-config>`，journal 与导入输入都在临时目录；临时配置使用 `tests/data/configs/basic_onefile.yaml` 的字段结构。
+
+先复现本轮回归与基线（四棵树：`90de4948`、`7875131`、`9340d81`、本轮修复后）：
+
+| 命令 | `90de4948` | `7875131` | `9340d81`（修前） | 本轮（修后） |
+|---|---|---|---|---|
+| `--format whatformats --help` | 2（invalid choice） | 2（invalid choice） | 0（打印帮助） | 2（invalid choice） |
+| `--format whatformats -h` | 2（invalid choice） | 2（invalid choice） | 0（打印帮助） | 2（invalid choice） |
+| `--help --format whatformats` | 0 | 0 | 0 | 0 |
+| `-h --format whatformats` | 0 | 0 | 0 | 0 |
+| `--format whatformats --version` | 2 | 2 | 2 | 2 |
+| `--version --format whatformats` | 2 | 2 | 2 | 2 |
+| `--import --format json --help` | 0 | 0 | 0 | 0 |
+| `--import --help --format whatformats` | 0 | 0 | 0 | 0 |
+| `--import --format whatformats --help` | 2（invalid choice） | 2（invalid choice） | 0（打印帮助） | 2（invalid choice） |
+| `--format whatformats --help --badoption` | 2（invalid choice） | 2（invalid choice） | 0（打印帮助） | 2（invalid choice） |
+| `--export whatformats --help` | 2（`argument --export: invalid choice`） | 2（`argument --export: invalid choice`） | 0（打印帮助） | 2（`argument --export: invalid choice`） |
+| `--format whatformats --import --help` | 2（invalid choice） | 2（invalid choice） | 0（打印帮助） | 2（invalid choice） |
+| `--import --format json -h` | 0 | 0 | 0 | 0 |
+
+四棵树全量对照（`90de4948`、`7875131`、`9340d81`、本轮各跑同一 38 组真实 CLI；含旧 31 组与正反序控制，rc 为退出码）：
+
+- `9340d81` 与本轮修复后逐行比较该 38 组矩阵，**只有 3 行变化**，且都是 help 前已消费非法格式：`--format whatformats --help` 0→2、`--format whatformats -h` 0→2、`--import --format whatformats --help` 0→2；错误文案均为 `jrnl: error: argument --format: invalid choice: 'whatformats' (choose from boxed, calendar, ..., yaml)`。其余 35 行（错误组合 11 例、正常导入 2 例、独立导出／列表／help／version／diagnostic、值消费 3 例、后置 list 2 例、反向 list 拒绝、version/help 优先级、两条 `--` 边界）rc 与文案完全一致。
+- 矩阵外另补测三类同源顺序，均 `90de4948`／`7875131` 为 2、`9340d81` 为 0、本轮为 2：隐藏别名 `--export whatformats --help`（`argument --export: invalid choice`）、`--format whatformats --help --badoption`、`--format whatformats --import --help`。同类回归均被恢复。
+- 上述变化行在本轮恢复后的 rc 与文案，与 `90de4948`、`7875131` 对应行逐字一致。
+- `--format whatformats --badoption` 与 `--badoption --format whatformats`：本轮与 `9340d81` 相同，均 exit 2、stderr 为 `unrecognized arguments: --badoption`，journal 未变；与基线的 `invalid choice` 只是诊断选择不同，按任务定为非阻断差异。
+- `--` 交互对照（`9340d81` vs 本轮）：`-- --help`、`--help -- --format whatformats`、`-- --format whatformats --help`、`--format json -- --help` 的 rc 与输出一致。
+- 帮助文本：`--help` 输出与本轮修复前的 `9340d81` 逐字节相同（`cmp` 无差异）。
+
+回归有效性（同一份新测试放到各树运行）：
+
+| 树 | 结果 | 说明 |
+|---|---|---|
+| `90de4948`（基线） | 4 passed | 该回归在基线不存在 |
+| `7875131`（修前候选） | 4 passed | 该回归在 `7875131` 也不存在 |
+| `9340d81`（引入回归） | 2 failed / 2 passed | 两个前置 `--help`／`-h` 用例失败（exit 0 而非 2） |
+| 本轮修复后 | 4 passed | 失败→通过 |
+
+journal 保护：先把临时 journal 写入固定内容并记 md5，再跑 `--format whatformats --badoption`、`--badoption --format whatformats`、`--format whatformats --help`、`--format whatformats -h`，四次 rc 均为 2 且 md5 不变。
+
+套件与静态检查（`<deps-python> -m pytest ... -q -p no:cacheprovider`；单元与 BDD 用 `-n0` 避免 xdist 干扰）：
+
+- `tests/unit/test_parse_args.py`：79 passed（原 75 + 新增 4）。
+- `tests/unit` 全量：223 passed, 27 skipped（上一轮 219 passed）。
+- `tests/bdd/test_features.py` 全量：497 passed, 17 skipped；定向 `-k "import or format"`：31 passed, 1 skipped。
+- `ruff check .`：All checks passed。
+- `black --check .`：76 files would be left unchanged（Python 3.13 对 3.14 目标的 AST 安全提示为环境提示，不影响结果）。
+- 未运行：`poe lint` 的 `poetry check` 步骤与 `tox` 路径；本机与遗留环境均无 `poetry`／`tox`／`poe`，按 no-install 约束未安装，保留未跑项。`#2120` 按任务要求沿用负责人 2026-11-02 22:17 UTC 的观察，未绕网络复查。
+
+### 3. 卡点（页面哪一句、缺什么、做错过什么）
+
+1. **页面《第一步》“已经处于能读仓库、改文件和运行检查的会话，就直接继续”**：前提是“能运行检查”，但本机系统 Python 3.13 缺 `ruamel.yaml`、`cryptography`、`keyring`、`parsedatetime`、`tzlocal`、`pytest`，页面又禁止安装时没有写“如何发现已有的隔离环境”。本轮沿用前几轮本单元遗留的 `<deps-python>` 只作解释器，未安装、未改全局配置。属**页面缺口 + 环境缺失**，不是读者误解。
+2. **我一开始把“原行为失败”的参照树选错**：第一遍只把同一份新测试放到 `90de4948` 与 `7875131` 跑，看到 4 passed，一度以为测试写错。实际这两个树本来就没有该回归，回归是 `9340d81` 引入的；改用 `git archive 9340d81` 的临时树重跑，才得到预期的 2 failed / 2 passed。记录此点，避免把“基线通过”误当成“回归无效”。
+3. **页面解析提交／全文指纹**：与上轮相同，原件缺失且任务已要求停止索求。本轮不读私人会话、不用当前页面回填、不重跑首次阅读；页面全文只来自 `job.md` 附文。属**输入回执缺失**，不是页面方法问题。
+4. **任务级细节，页面未覆盖**：help action 里不能直接套用含最终互斥的完整检查（否则 `--import --format json --help` 会从 exit 0 变 2），只能校验 help 之前实际消费的格式值。这是本任务的具体约束，页面没有也不需要有；不算页面缺口。
+5. **环境编码**：本轮从起手设置 `PYTHONUTF8=1`／`PYTHONIOENCODING=utf-8`，未再出现 Windows GBK 的 `UnicodeEncodeError`。
+
+### 4. 页面之外还翻了什么
+
+- 任务文件 `job.md`（页面全文、第四轮返工清单与约束）。
+- 目标仓 `CLAUDE.md`（测试 fixture、真实配置／journal 保护规则）。
+- 源码：`jrnl/args.py`、`jrnl/commands.py`、`jrnl/controller.py`、`jrnl/main.py`、`jrnl/plugins/__init__.py`。
+- 测试与数据：`tests/unit/test_parse_args.py`、`tests/data/configs/basic_onefile.yaml`、`tests/data/journals/basic_onefile.journal`。
+- 配置：`pyproject.toml`（pytest `-n=auto` 等 addopts）。
+- 标准库行为：用 `<deps-python>` 的 `inspect.getsource(argparse.ArgumentParser._parse_known_args2)` 确认 argparse 按 token 顺序触发 action，说明 help action 在退出前能看到此前已记录的格式值。
+- 版本历史：只用 `git archive` 把 `90de4948`、`7875131`、`9340d81` 解到临时树做对照，未切分支、未 checkout、未动其他工作树。
+- 遗留隔离依赖环境 `<deps-python>`：只作解释器与 pytest／ruff／black 运行环境；未读其中旧读者结果或作者解题记录。
+- 未读 a1dbv 其他页面、地图、TASKS、其他卡或旧结果；未搜同主题的其它教程；未使用账号、凭据、付费服务；未联网核对 `#2120`。
+
+### 5. 产物与状态
+
+- 代码改动（仓库相对路径）：`jrnl/args.py`、`tests/unit/test_parse_args.py`。
+- 记录：本段追加在 `reader-tests/A-AGENT-CHOICE-READER-20261103-u1.md` 末尾，首轮至第三轮原文未改。
+- 未提交、未推送、未切换分支、未改任务文件与页面；临时 config／journal／对照树都在临时目录，未写入本机绝对路径或内网地址。
+- 恢复条件：本轮的必修项（help 前非法格式 exit 2、反序 help exit 0、version 前未知格式 exit 2、`--help`／`-h` 同语义、`--import --format json --help` 保持 help 优先级、badoption 两序仍 exit 2 且 journal 不变）均已在本地复现并修复；剩余未跑项只有 `poe lint` 的 `poetry check`、`tox` 和上游 `#2120` 状态复核，均因本机缺依赖或任务约束保留。需接收端与另一名复验者独立核 diff、CLI 与回归后再定 review 状态。
+
+## 核对（第四轮，非读者复核，2026-11-03）
+
+**结论：本轮必修项做成（taskDone=true），未发现新的未披露行为回归。验收按有限通过、非阻断差异、未验分开，不把 taskDone 当作整体验收概括。**
+
+### 独立复算（未采信自报）
+- 工作树只有 `jrnl/args.py`（+47/−9）、`tests/unit/test_parse_args.py`（+20/−0）和本记录（+99/−0，纯追加在第三轮核对之后）；HEAD 仍为 `9340d81`，分支 `receiver/A-AGENT-CHOICE-READER-20261103`，未提交、未推送、无 untracked；依赖声明、页面、任务文件未动。
+- 用前几轮遗留的隔离依赖环境 `<deps-python>`（只作解释器，未安装、未更新）重跑：`tests/unit/test_parse_args.py` 79 passed；`tests/unit` 223 passed/27 skipped；BDD 全量 497 passed/17 skipped；定向 `-k "import or format"` 31 passed/1 skipped；`ruff check .` 通过；`black --check .` 76 files unchanged（Python 3.13 对 3.14 目标的 AST 安全提示为环境提示）。
+- 回归有效性（同一份新测试的 4 个新 case）：`90de4948` 4 passed、`7875131` 4 passed、`9340d81` 2 failed/2 passed、当前候选 4 passed；`9340d81` 失败的正是两个前置 help 用例（exit 0 而非 2）。与读者判断一致。
+- 真实 CLI（四棵树各自临时 config／journal，经 `<deps-python>` 直调 `jrnl.main.run`；旧版本树只会升级自己的临时 config，未触真实配置）：
+  - `--format whatformats --help`、`--format whatformats -h`、`--import --format whatformats --help`、`--export whatformats --help`、`--format whatformats --import --help`、`--format whatformats --help --badoption`：`90de4948`／`7875131` 为 2，`9340d81` 为 0，当前候选为 2；候选 stderr 与 `90de4948` 逐字节一致（`argument --format|--export: invalid choice ...`）。
+  - 反序 `--help --format whatformats`、`-h --format whatformats`：各树均 0；`--format whatformats --version`、`--version --format whatformats`：各树均 2；`--import --format json --help`、`--import --help --format whatformats`：各树均 0。help／`-h` 同语义，`--import --format json --help` 的 help 优先级保住。
+  - 22 组差分（含缩写 `--hel`／`--ve`、`--config-override` 值消费、positional 文本、两条 `--` 边界）：候选与 `90de4948` 除下述已披露差异外，rc 与 stderr 一致；`--` 类中仅有的输出差异来自临时 journal 路径／旧版本树自动升级临时 config，不是行为差异。
+  - `--format whatformats --badoption` 与 `--badoption --format whatformats`：候选与 `9340d81` 相同，均 2、`unrecognized arguments: --badoption`；与基线 `invalid choice` 只是诊断选择不同。跑前后临时 journal md5 不变。
+  - 错误组合 `--import --format {jrnl,json,whatformats}`、`--import --format=json`、`--format json --import`、`--imp/--impo/--impor`、`--import --form json`、`--import --export/--exp json`、`--list --import --format json`：均 2，文案为 `argument --format|--export: not allowed with argument --import`。
+  - 正常路径 `--import --file`、stdin `--import`、`--format json|text|tags`、`--list --format json`、`--import --list --format json`：均 0；json 输出可解析。
+  - `--help` 输出与 `9340d81` 逐字节相同（`cmp`）。
+- 未运行：`poe lint` 的 `poetry check`、`tox`（本机与遗留环境均无 `poetry`／`tox`／`poe`）；`#2120` 按任务要求沿用负责人 2026-11-02 22:17 UTC 观察，未联网复核；页面解析 SHA／全文指纹原件仍缺失，未回填、未重跑首次阅读。
+
+### 卡点判定
+1. 缺依赖且禁装时页面未写如何发现已有隔离环境 → **page（小缺口）+ 环境缺失**：页面已写“缺依赖且不能安装时保留未跑项”，但未写发现既有隔离环境；读者复用前几轮 `<deps-python>`、未安装依赖，处理正确。
+2. 回归参照树最初选错（先只跑 `90de4948`／`7875131` 得 4 passed）→ **model（已自纠）**：任务文本已明说 `9340d8` 是引入回归的树；读者改用 `git archive 9340d81` 后得到 2 failed/2 passed，记录完整，无残余影响。
+3. 页面解析 SHA／全文指纹原件缺失 → **page（输入回执缺口，非读者）**：按任务停止索求、未用当前页回填、未重跑首次阅读，处理合规。
+4. `#2120` 未联网复核 → **page（任务侧约束，非读者）**：任务明确要求沿用原观察、不绕网络重查，读者照做；页面本身不负责 PR 状态。
+
+### 读者未意识到的
+- 本轮未发现新的未披露行为回归。仍与基线不同的只有任务已定性的两类非阻断差异：`--format whatformats --badoption`（及同源“先出现未知选项”组合）由 `invalid choice` 变 `unrecognized arguments`（同 exit 2），以及未知格式与 `--import` 同用优先报互斥（这正是任务要求的行为）。
+- 读者记录的“38 组”矩阵未逐条列出全部命令，只能按列出的关键项复核；属记录粒度限制，不影响本轮必修结论。
+
+### 页面能否指导选路
+页面“已有入口能完成就保留”“先读项目规则、核工作树差量”“自己核 diff、重放原触发路径”足以指导本轮返工；本轮继续“保留当前会话”符合页面。仍需页面补的只有“缺依赖且禁装时如何发现既有隔离环境”一句。`#2120` 状态与解析回执缺失属任务／输入侧约束，不影响选路结论。

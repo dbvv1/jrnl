@@ -215,6 +215,26 @@ def test_help_takes_precedence_over_import_format(cli, capsys):
     assert "usage:" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("help_option", ["--help", "-h"])
+def test_invalid_format_before_help_is_rejected(help_option, capsys):
+    """argparse validated choices while consuming the option, before help ran."""
+    with pytest.raises(SystemExit) as wrapped_e:
+        cli_as_dict(f"--format whatformats {help_option}")
+
+    assert wrapped_e.value.code == 2
+    assert "invalid choice: 'whatformats'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("help_option", ["--help", "-h"])
+def test_help_before_invalid_format_still_prints_help(help_option, capsys):
+    """Nothing was consumed yet, so --help keeps its original precedence."""
+    with pytest.raises(SystemExit) as wrapped_e:
+        cli_as_dict(f"{help_option} --format whatformats")
+
+    assert wrapped_e.value.code == 0
+    assert "usage:" in capsys.readouterr().out
+
+
 def test_import_format_after_double_dash_is_entry_text():
     """Everything after a bare -- is text, even if it spells an option."""
     assert cli_as_dict("-- --import --format json") == expected_args(

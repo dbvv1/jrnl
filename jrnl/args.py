@@ -56,6 +56,30 @@ class ExportFormatAction(argparse.Action):
         occurrences.append((option_string, values))
 
 
+def validate_export_format_values(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> None:
+    """Reject every consumed format name that is not an export format.
+
+    ``--format``/``--export`` no longer declare ``choices`` so that the
+    import conflict can be reported instead of an unrelated list of export
+    formats.  Checking each recorded occurrence restores the original
+    per-option validation, including for values that appear before ``--help``.
+    """
+
+    occurrences = getattr(args, "_export_occurrences", None)
+    if not occurrences:
+        return
+
+    choices = ", ".join(EXPORT_FORMATS)
+    for option_string, value in occurrences:
+        if value not in EXPORT_FORMATS:
+            parser.error(
+                f"argument {option_string or '--format'}: invalid choice: "
+                f"{value!r} (choose from {choices})"
+            )
+
+
 def validate_export_format(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> None:
@@ -86,13 +110,25 @@ def validate_export_format(
     if args.postconfig_cmd is postconfig_import and not callable(args.preconfig_cmd):
         parser.error(f"argument {option_string}: not allowed with argument --import")
 
-    choices = ", ".join(EXPORT_FORMATS)
-    for option_string, value in occurrences:
-        if value not in EXPORT_FORMATS:
-            parser.error(
-                f"argument {option_string or '--format'}: invalid choice: "
-                f"{value!r} (choose from {choices})"
-            )
+    validate_export_format_values(args, parser)
+
+
+class ExportHelpAction(argparse._HelpAction):
+    """Print help, after validating the formats argparse already consumed.
+
+    ``--help`` exits as soon as argparse reaches it, before the post-parse
+    validation runs.  The original parser validated each format while
+    consuming the option, so ``--format whatformats --help`` exited 2 instead
+    of printing help.  Re-check the values recorded so far to keep that order;
+    ``--help --format whatformats`` leaves nothing to check and still prints
+    help.  The --import/--format conflict depends on the final command, so it
+    deliberately stays out of this action and ``--import --format json
+    --help`` keeps its help precedence.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        validate_export_format_values(namespace, parser)
+        super().__call__(parser, namespace, values, option_string)
 
 
 def parse_not_arg(
@@ -150,8 +186,10 @@ def parse_args(args: list[str] = []) -> argparse.Namespace:
         "Standalone Commands",
         "These commands will exit after they complete. You may only run one at a time.",
     )
-    standalone.add_argument("--help", action="help", help="Show this help message")
-    standalone.add_argument("-h", action="help", help=argparse.SUPPRESS)
+    standalone.add_argument(
+        "--help", action=ExportHelpAction, help="Show this help message"
+    )
+    standalone.add_argument("-h", action=ExportHelpAction, help=argparse.SUPPRESS)
     standalone.add_argument(
         "--version",
         action="store_const",
