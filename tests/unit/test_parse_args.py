@@ -232,6 +232,82 @@ def test_format_without_import_is_unaffected():
     assert cli_as_dict("--format json") == expected_args(export="json")
 
 
+def test_unknown_format_alone_is_rejected(capsys):
+    """A format that is not an exporter is still an invalid choice on its own."""
+    with pytest.raises(SystemExit) as wrapped_e:
+        cli_as_dict("--format whatformats")
+
+    assert wrapped_e.value.code == 2
+    assert "invalid choice: 'whatformats'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "cli, override, export, is_import",
+    [
+        (
+            "--import --config-override editor --format",
+            [["editor", "--format"]],
+            False,
+            True,
+        ),
+        (
+            "--import --config-override editor --format=json",
+            [["editor", "--format=json"]],
+            False,
+            True,
+        ),
+        (
+            "--config-override editor --import --format json",
+            [["editor", "--import"]],
+            "json",
+            False,
+        ),
+    ],
+)
+def test_format_spelled_as_an_option_value_is_not_a_format(
+    cli, override, export, is_import
+):
+    """--config-override consumes two values; they are values, not options.
+
+    argparse hands the second token to --config-override even when it looks
+    like an option, so those commands do not run as an import/format pair.
+    In the last case --import itself is the consumed value, so no standalone
+    command runs at all.
+    """
+    from jrnl.commands import postconfig_import
+
+    assert cli_as_dict(cli) == expected_args(
+        postconfig_cmd=postconfig_import if is_import else None,
+        config_override=override,
+        export=export,
+    )
+
+
+@pytest.mark.parametrize(
+    "cli",
+    [
+        "--import --list --format json",
+        "--import --ls --format json",
+    ],
+)
+def test_list_after_import_keeps_list_command(cli):
+    """The last standalone command wins, so --list still runs with its format."""
+    from jrnl.commands import postconfig_list
+
+    assert cli_as_dict(cli) == expected_args(
+        postconfig_cmd=postconfig_list, export="json"
+    )
+
+
+def test_import_after_list_is_rejected(capsys):
+    """The reverse order runs --import, so --format is a real conflict."""
+    with pytest.raises(SystemExit) as wrapped_e:
+        cli_as_dict("--list --import --format json")
+
+    assert wrapped_e.value.code == 2
+    assert "not allowed with argument --import" in capsys.readouterr().err
+
+
 def test_file_flag_alone():
     assert cli_as_dict("--file test.txt") == expected_args(filename="test.txt")
     assert cli_as_dict("--file 'lorem ipsum.txt'") == expected_args(

@@ -38,74 +38,61 @@ class IgnoreNoneAppendAction(argparse._AppendAction):
             super().__call__(parser, namespace, values, option_string)
 
 
-def resolve_option_string(
-    arg: str, long_options: set[str], option_strings: set[str]
-) -> str | None:
-    """Resolve an argument token to its option string the way argparse does.
+class ExportFormatAction(argparse.Action):
+    """Store the export format and remember which spelling selected it.
 
-    argparse accepts any unambiguous prefix of a long option (``--imp`` for
-    ``--import``, ``--form`` for ``--format``), so a plain string equality
-    check misses valid spellings. Values after ``--`` are handled by the caller.
+    ``--format`` and its hidden alias ``--export`` share the ``export``
+    destination, so the conflict message cannot tell them apart afterwards.
+    The format name is not validated here; ``validate_export_format`` runs
+    once argparse knows the command the CLI would actually execute.
     """
 
-    if arg in option_strings:
-        return arg
-
-    if not arg.startswith("--"):
-        return None
-
-    name = arg.split("=", 1)[0]
-    matches = {option for option in long_options if option.startswith(name)}
-    return matches.pop() if len(matches) == 1 else None
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        occurrences = getattr(namespace, "_export_occurrences", None)
+        if occurrences is None:
+            occurrences = []
+            setattr(namespace, "_export_occurrences", occurrences)
+        occurrences.append((option_string, values))
 
 
-def parse_import_and_format(args: list[str], parser: argparse.ArgumentParser) -> None:
+def validate_export_format(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> None:
+    """Reject --format combined with --import, then validate the format names.
+
+    ``--format`` selects an export format while ``--import`` imports another
+    journal, so running both has no meaning.  Because ``--format`` only lists
+    *export* formats, argparse would otherwise reject ``--import --format
+    jrnl`` as an invalid choice and hand the user a list of unrelated export
+    formats; the conflict is reported instead.
+
+    This runs after parsing, so it sees the arguments exactly as argparse
+    consumed them: option prefixes are resolved, ``--`` marks the end of
+    options, values consumed by options such as ``--config-override`` are
+    values rather than options, and the last standalone command wins.  That
+    last point is why ``--import --list --format json`` stays valid while
+    ``--list --import --format json`` is rejected.
     """
-    --format selects an export format, so it cannot be combined with --import.
 
-    This runs against the raw arguments, before argparse validates --format,
-    because that validation is what produces the misleading message: --format
-    is restricted to the *export* formats, so `--import --format jrnl` -- the
-    combination the --import help text itself describes -- is rejected as an
-    invalid choice, and the user is handed a list of export formats to pick
-    from instead of being told the two options do not go together.
-
-    Everything after a bare ``--`` is entry text or a search term, not an
-    option, so it must not trigger this check. ``--help``, ``--version`` and
-    other pre-config commands are resolved before --import, so they keep their
-    original precedence when they appear in the option part of the command.
-    """
-
-    if "--" in args:
-        args = args[: args.index("--")]
-
-    option_strings = {
-        option for action in parser._actions for option in action.option_strings
-    }
-    long_options = {option for option in option_strings if option.startswith("--")}
-    parsed_options = {
-        option
-        for arg in args
-        if (option := resolve_option_string(arg, long_options, option_strings))
-    }
-
-    # These commands run before --import in the controller; do not turn their
-    # successful exit into an argument error.
-    preconfig_options = {
-        option
-        for action in parser._actions
-        if action.dest == "preconfig_cmd" or isinstance(action, argparse._HelpAction)
-        for option in action.option_strings
-    }
-    if preconfig_options & parsed_options:
+    occurrences = getattr(args, "_export_occurrences", None)
+    if not occurrences:
         return
 
-    if "--import" not in parsed_options:
-        return
+    option_string = occurrences[-1][0] or "--format"
 
-    for option in parsed_options:
-        if option in ("--format", "--export"):
-            parser.error(f"argument {option}: not allowed with argument --import")
+    # Preconfig commands (--version, --diagnostic) run before any postconfig
+    # command, so they keep their original precedence.
+    if args.postconfig_cmd is postconfig_import and not callable(args.preconfig_cmd):
+        parser.error(f"argument {option_string}: not allowed with argument --import")
+
+    choices = ", ".join(EXPORT_FORMATS)
+    for option_string, value in occurrences:
+        if value not in EXPORT_FORMATS:
+            parser.error(
+                f"argument {option_string or '--format'}: invalid choice: "
+                f"{value!r} (choose from {choices})"
+            )
 
 
 def parse_not_arg(
@@ -413,7 +400,7 @@ def parse_args(args: list[str] = []) -> argparse.Namespace:
         "--format",
         metavar="TYPE",
         dest="export",
-        choices=EXPORT_FORMATS,
+        action=ExportFormatAction,
         help=f"""
         Display selected entries in an alternate format.
 
@@ -429,7 +416,7 @@ def parse_args(args: list[str] = []) -> argparse.Namespace:
         "--export",
         metavar="TYPE",
         dest="export",
-        choices=EXPORT_FORMATS,
+        action=ExportFormatAction,
         help=argparse.SUPPRESS,
     )
     exporting.add_argument(
@@ -517,8 +504,11 @@ def parse_args(args: list[str] = []) -> argparse.Namespace:
     # Handle '-123' as a shortcut for '-n 123'
     num = re.compile(r"^-(\d+)$")
     args = [num.sub(r"-n \1", arg) for arg in args]
-    parse_import_and_format(args, parser)
     parsed_args = parser.parse_intermixed_args(args)
+    validate_export_format(parsed_args, parser)
+    # Only used to word error messages; keep it out of the public namespace.
+    if hasattr(parsed_args, "_export_occurrences"):
+        del parsed_args._export_occurrences
     parsed_args = parse_not_arg(args, parsed_args, parser)
 
     return parsed_args
